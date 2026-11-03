@@ -172,11 +172,16 @@ static void deliver(void *ctx, const uint8_t *msg, size_t len)
     uint8_t type;
     rbuf payload;
     rb_init(&r, msg, len);
-    if (hf_next_msg(&r, &type, &payload))
-        room_on_message(d->c, type, &payload, d->now_ms);
+    if (!hf_next_msg(&r, &type, &payload))
+        return;
+    room_on_message(d->c, type, &payload, d->now_ms);
+    if (type == MSG_PING)
+        d->c->flush_now = 1;  /* the PONG is stamped now, so it must leave now */
 }
 
-static void handle_datagram(const uint8_t *buf, size_t n, const struct sockaddr_storage *from,
+static void flush_conn(int fd, conn *c, uint64_t now_ms);
+
+static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct sockaddr_storage *from,
                             socklen_t from_len, uint64_t now_ms)
 {
     rbuf r;
@@ -216,6 +221,10 @@ static void handle_datagram(const uint8_t *buf, size_t n, const struct sockaddr_
     c->last_recv_ms = now_ms;
     delivery d = {c, now_ms};
     rel_read_packet(&c->rel, now_ms, &r, deliver, &d);
+    if (c->flush_now) {
+        c->flush_now = 0;
+        flush_conn(fd, c, now_ms);
+    }
 }
 
 void udp_receive(int fd, uint64_t now_ms)
@@ -231,32 +240,35 @@ void udp_receive(int fd, uint64_t now_ms)
             return;  /* EAGAIN: drained */
         }
         stats.rx++;
-        handle_datagram(buf, (size_t)n, &from, from_len, now_ms);
+        handle_datagram(fd, buf, (size_t)n, &from, from_len, now_ms);
     }
+}
+
+/* At least one packet, which carries acks and doubles as a heartbeat; more
+ * while there is a backlog. Unreliable messages that did not fit are dropped. */
+static void flush_conn(int fd, conn *c, uint64_t now_ms)
+{
+    for (int k = 0; k < FLUSH_MAX_PACKETS; k++) {
+        if (k > 0 && !rel_wants_send(&c->rel, now_ms))
+            break;
+        uint8_t pkt[HF_MAX_PACKET];
+        wbuf w;
+        wb_init(&w, pkt, sizeof pkt);
+        hf_put_udp_header(&w, c->token);
+        rel_write_packet(&c->rel, now_ms, &w);
+        if (w.overflow)
+            break;
+        netsim_send(fd, pkt, w.len, (struct sockaddr *)&c->addr, c->addr_len, now_ms);
+        stats.tx++;
+    }
+    rel_drop_unreliable(&c->rel);
 }
 
 void udp_flush(int fd, uint64_t now_ms)
 {
-    for (int i = 0; i < MAX_CONNS; i++) {
-        conn *c = &conns[i];
-        if (!c->used)
-            continue;
-        /* Always one packet per tick: it carries acks and doubles as a heartbeat. */
-        for (int k = 0; k < FLUSH_MAX_PACKETS; k++) {
-            if (k > 0 && !rel_wants_send(&c->rel, now_ms))
-                break;
-            uint8_t pkt[HF_MAX_PACKET];
-            wbuf w;
-            wb_init(&w, pkt, sizeof pkt);
-            hf_put_udp_header(&w, c->token);
-            rel_write_packet(&c->rel, now_ms, &w);
-            if (w.overflow)
-                break;
-            netsim_send(fd, pkt, w.len, (struct sockaddr *)&c->addr, c->addr_len, now_ms);
-            stats.tx++;
-        }
-        rel_drop_unreliable(&c->rel);
-    }
+    for (int i = 0; i < MAX_CONNS; i++)
+        if (conns[i].used)
+            flush_conn(fd, &conns[i], now_ms);
 }
 
 void udp_maintain(uint64_t now_ms)

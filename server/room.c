@@ -183,7 +183,11 @@ static void on_hello(conn *c, rbuf *payload, uint64_t now_ms)
             p->c->token = 0;
             conn_close_soon(p->c, now_ms);
         }
-        c->token = p->token;  /* the client keeps the session id it already knows */
+        /* The player keeps their slot but gets this connection's fresh token.
+         * Packets still in flight from the old connection carry the old token
+         * and are now rejected as stale instead of mixing their sequence
+         * numbers and acks into the new connection's. */
+        p->token = c->token;
     } else {
         p = free_slot();
         if (!p) {
@@ -581,15 +585,21 @@ void room_tick(uint64_t now_ms)
 
 void room_stats(char *out, size_t cap)
 {
-    int players = 0, connected = 0, alive = 0;
+    int players = 0, connected = 0, ready = 0, alive = 0;
+    char waiting[64] = "";
     for (int i = 0; i < HF_MAX_PLAYERS; i++) {
         const player *p = &R.p[i];
         if (!p->used)
             continue;
         players++;
         connected += p->c != NULL;
+        ready += p->c && p->ready;
         alive += p->playing && p->body.alive;
+        if (p->c && !p->ready && strlen(waiting) < 40) {
+            strcat(waiting, waiting[0] ? "," : " waiting for ");
+            strncat(waiting, p->name, 12);
+        }
     }
-    snprintf(out, cap, "%s tick=%u players=%d connected=%d alive=%d", phase_name(R.phase), R.tick, players,
-             connected, alive);
+    snprintf(out, cap, "%s tick=%u players=%d connected=%d ready=%d alive=%d%s", phase_name(R.phase), R.tick,
+             players, connected, ready, alive, R.phase == PHASE_LOBBY ? waiting : "");
 }

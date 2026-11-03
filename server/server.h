@@ -21,13 +21,14 @@ typedef enum { TRANSPORT_UDP = 0, TRANSPORT_WEBSOCKET = 1 } transport_kind;
 typedef struct conn {
     int used;
     transport_kind transport;
-    uint64_t token;           /* session id; the client puts it in every UDP packet */
+    uint64_t token;           /* this connection's session id; the client puts it in every UDP packet */
     int token_confirmed;      /* the client has started using the token */
     struct sockaddr_storage addr;
     socklen_t addr_len;
     rel_endpoint rel;         /* UDP only */
     uint64_t created_ms, last_recv_ms, close_at_ms;
     int kill;                 /* set from inside a callback; acted on in udp_maintain */
+    int flush_now;            /* a PONG is waiting: send without waiting for the tick */
     int player;               /* room slot, -1 until HELLO */
 } conn;
 
@@ -46,7 +47,7 @@ void room_stats(char *out, size_t cap);
 
 /* udp.c: the UDP transport. */
 int udp_open(uint16_t port);
-void udp_receive(int fd, uint64_t now_ms);
+void udp_receive(int fd, uint64_t now_ms);  /* also sends PONGs immediately */
 void udp_flush(int fd, uint64_t now_ms);
 void udp_maintain(uint64_t now_ms);
 void udp_stats(char *out, size_t cap);

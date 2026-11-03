@@ -70,7 +70,7 @@ void hf_clean_name(char *name);
 typedef struct {
     uint16_t version;
     uint8_t kind;
-    uint64_t resume_token;  /* 0 for a new player; the old session id to reclaim a slot */
+    uint64_t resume_token;  /* 0 for a new player; the latest session id to reclaim a slot */
     char name[HF_NAME_MAX + 1];
 } msg_hello;
 
@@ -95,7 +95,7 @@ typedef struct { uint8_t reason; } msg_bye;
 /* ---- server -> client ---- */
 
 typedef struct {
-    uint64_t token;      /* session id; also the key to reconnect */
+    uint64_t token;      /* this connection's session id, and the key to reclaim the player later */
     uint16_t player_id;
     uint8_t color;
     uint8_t tick_hz;
