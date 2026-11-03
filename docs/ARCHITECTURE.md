@@ -1,118 +1,116 @@
-# 架構
+# Architecture
 
-## 原則
+## Principles
 
-1. **server 說了算**：誰在哪裡、哪一格掉了、誰被淘汰，全部由 server 決定。client 只送「操作」，只畫 server 告訴它的東西。
-2. **訊息格式只有一套**：電腦走 UDP、手機走 WebSocket，但訊息的每一個 byte 都一樣。不一樣的只有最外層的「信封」。
-3. **傳輸方式可以抽換**：遊戲邏輯（`server/room.c`）只呼叫 `conn_send()`，完全不知道底下是 UDP 還是 WebSocket。
+1. **The server is the authority.** Where everybody is, which tile fell and who is out is decided by the server alone. Clients send inputs and draw what they are told.
+2. **One message format.** Desktop clients use UDP and browser clients will use WebSocket, but every message is the same bytes either way. Only the outer envelope differs.
+3. **Transports are interchangeable.** The game logic (`server/room.c`) only ever calls `conn_send()` and does not know whether a connection is UDP or WebSocket.
 
-## 分層
+## Layers
 
 ```
- 電腦 client / 機器人（C）                手機（瀏覽器 JS，第二階段）
-          │                                        │
- ┌────────┴─────────────┐              ┌───────────┴───────────┐
- │ UDP 信封（12 bytes）  │              │ WebSocket 封包（TCP） │
- │ 可靠性層 reliable.c   │              │ 自己刻，不用函式庫    │
- └────────┬─────────────┘              └───────────┬───────────┘
-          └──────── 同一套訊息：type | length | payload ────────┘
-                                   │
-                    conn_send() ── room.c（遊戲、狀態機）── sim.c（物理）
+ desktop client / bot (C)                  browser client (JS, planned)
+          │                                          │
+ ┌────────┴──────────────┐              ┌────────────┴────────────┐
+ │ UDP envelope (12 B)    │              │ WebSocket frames (TCP)   │
+ │ reliability layer      │              │ hand-written, no library │
+ └────────┬──────────────┘              └────────────┬────────────┘
+          └────────── same messages: type | length | payload ──────────┘
+                                     │
+               conn_send() ── room.c (game, state machine) ── sim.c (physics)
 ```
 
-## 兩種訊息：可靠和不可靠
+## Reliable and unreliable messages
 
-| 類別 | 訊息 | UDP 上怎麼送 | WebSocket 上怎麼送 |
+| Class | Messages | Over UDP | Over WebSocket |
 |---|---|---|---|
-| 可靠、照順序 | HELLO、READY、BYE、WELCOME、ROOM、TILES、TILE_EVENTS、ELIMINATED、ERROR | 可靠性層：沒收到確認就重送，接收端照順序交出 | 直接送（TCP 本來就可靠、有順序） |
-| 不可靠、新的蓋舊的 | INPUT、PING、PONG、SNAPSHOT | 只送一次，掉了就算了 | 直接送；如果這條連線塞住了，就丟掉舊的快照不送 |
+| Reliable, ordered | HELLO, READY, BYE, WELCOME, ROOM, TILES, TILE_EVENTS, ELIMINATED, ERROR | Reliability layer: resent until acknowledged, delivered in order | Sent as is; TCP already guarantees delivery and order |
+| Unreliable, newest wins | INPUT, PING, PONG, SNAPSHOT | Sent once; a lost one is simply replaced by the next | Sent as is; when the connection backs up, stale snapshots are dropped instead of queued |
 
-訊息屬於哪一類由型別決定（`hf_msg_is_reliable()`），兩種傳輸方式共用同一張表。
+The class is a property of the message type (`hf_msg_is_reliable()`), shared by both transports.
 
-## UDP 可靠性層（common/reliable.c）
+## The UDP reliability layer (`common/reliable.c`)
 
-這就是課本 Ch.22「替 UDP 加上可靠性」的做法：
+- **Every packet carries a sequence number,** plus the newest sequence number received from the peer and a 32-bit history of the packets before it. One packet can therefore acknowledge up to 33 of the peer's packets, and a lost acknowledgement costs nothing as long as a later packet gets through.
+- **Reliable messages** ride in packets and are resent after a timeout until a packet carrying them is acknowledged. The timeout is computed like TCP's: `RTO = SRTT + 4 × RTTVAR`.
+- **Every packet has its own send time,** even when it carries resent messages, so RTT samples are never ambiguous (the problem Karn's algorithm solves for TCP).
+- **The receiver orders reliable messages** in a 128-message window before handing them over, and discards duplicates.
+- **Unreliable messages (snapshots, inputs) are never resent.** A new snapshot arrives 33 ms later, so resending an old one would only add delay. This is how a game avoids TCP's head-of-line blocking, where one lost packet holds up everything behind it.
 
-- **每個封包都有序號**，同時帶著「我收到的最新序號」加上「它前面 32 個收到了哪些」（32 bit）。所以一個封包可以一次確認對方 33 個封包，確認封包掉了也沒關係。
-- **可靠訊息**放進封包送出，直到某個裝著它的封包被確認為止；逾時就重送。逾時時間的算法跟 TCP 一樣：`RTO = SRTT + 4 × RTTVAR`。
-- **每個封包都有自己的送出時間**，就算裡面裝的是重送的訊息，量到的 RTT 也不會搞混（Karn 演算法要解決的問題）。
-- **接收端用 128 格的視窗**把可靠訊息排好順序再交出，重複的直接丟掉。
-- **不可靠訊息**（快照、輸入）不重送：下一個快照 33 ms 後就到了，重送舊的沒有意義。這正好避開 TCP「掉一個、後面全部排隊等」的問題。
+`tests/test_reliable.c` runs two endpoints over a simulated link with 30% loss, 20–120 ms of delay (which reorders packets) and 5% duplication; 1,900 reliable messages must all arrive exactly once and in order.
 
-測試（`tests/test_reliable.c`）用模擬的爛網路驗證：掉 30% 封包、延遲 20 到 120 ms、5% 重複，1900 則可靠訊息全部照順序、剛好收到一次。
+## Connections and reconnecting
 
-## 連線和斷線重連
+- **Handshake.** A client's first packets carry session 0 and a HELLO. The server matches them by source address, replies with WELCOME carrying a random 64-bit token, and from then on the client puts the token in every packet.
+- **Changing networks.** The server recognises clients by token, not by address. When a phone moves from Wi-Fi to cellular, or a NAT picks a new external port, the server sees the right token from a new address and simply updates the address.
+- **Losing a connection.** After 4 seconds without a packet the connection is considered lost. The player's slot is kept for 15 seconds; a HELLO carrying the old token within that time reclaims the same player.
+- **Heartbeats.** Both sides send at least one packet per tick (33 ms), carrying acknowledgements at minimum, so no separate heartbeat message is needed. This also keeps NAT mappings on the client's side alive.
 
-- **握手**：client 第一次送的封包，session 欄位是 0，裡面裝 HELLO。server 先用「來源位址」對應這條連線，回 WELCOME，裡面有一組 64-bit 隨機 token。之後 client 每個封包都帶這組 token。
-- **換網路也不怕**：server 用 token 認人，不靠 IP。手機從 Wi-Fi 換到 4G、或玩家的路由器換了對外 port（NAT 重新綁定），server 看到 token 對、位址變了，就直接更新位址。
-- **斷線**：4 秒沒收到任何封包，就判定連線中斷。玩家的位子保留 15 秒，這段時間內用 HELLO 帶舊 token 回來，就接回原本的角色。
-- **心跳**：雙方每一輪（33 ms）都會送一個封包，裡面至少有確認資訊，所以不需要另外的心跳訊息。這也讓玩家那端的 NAT 對應不會過期。
+## The server loop (`server/main.c`)
 
-## 伺服器主迴圈（server/main.c）
-
-單一 thread、單一迴圈：
+One thread, one loop:
 
 ```
 loop:
-    poll(UDP socket, 等到下一輪該開始的時間)
-    有封包 → udp_receive()：拆信封 → 可靠性層 → room_on_message()
-    時間到了 → room_tick()：跑一輪遊戲 → udp_flush()：每條連線送出封包
-    udp_maintain()：逾時、關閉
+    poll(UDP socket, until the next tick is due)
+    packets → udp_receive(): envelope → reliability layer → room_on_message()
+    tick due → room_tick(): simulate one tick → udp_flush(): one packet per connection
+    udp_maintain(): timeouts, closing connections
 ```
 
-遊戲每秒跑 30 輪（`SIM_TICK_HZ`）。落後太多時會跳過幾輪，不會越追越慢。
+The game runs 30 ticks per second (`SIM_TICK_HZ`). If the loop falls far behind, it skips ticks instead of trying to catch up forever.
 
-## 房間狀態機（server/room.c）
+## Room state machine (`server/room.c`)
 
 ```
-LOBBY ──人數夠、全部準備好──> COUNTDOWN ──3 秒──> PLAYING ──剩一人──> RESULT ──5 秒──> LOBBY
-  ^                              │
-  └────有人離開或取消準備──────────┘
+LOBBY ──enough players, all ready──> COUNTDOWN ──3 s──> PLAYING ──one left──> RESULT ──5 s──> LOBBY
+  ^                                     │
+  └──────someone left or un-readied─────┘
 ```
 
-玩家狀態：已連線、斷線保留中（15 秒）、已移除；比賽中另外分成「還在場上」和「已淘汰（名次）」。
+Each player is connected, disconnected but within the grace period, or removed. During a round a player is either still on the board or eliminated with a finishing place.
 
-## 輸入（為之後的預測和校正鋪路）
+## Inputs (ready for prediction and reconciliation)
 
-- client 每一輪送一個 INPUT，每筆輸入有流水號，並且重複附上最新的 4 筆，掉一個封包不會少操作。
-- server 把輸入排隊，每一輪剛好用掉一筆。排太多（網路卡住後一次湧進來）就跳過舊的，但保留跳躍。
-- 每個快照都會告訴 client「你的輸入我用到第幾號」（`ack_input`）。第二階段 client 做預測時，就從這一號之後的輸入重算一次。
+- A client sends one INPUT per tick. Every input sample has a sequence number, and each INPUT repeats the newest four samples, so losing a packet loses no input.
+- The server queues samples and consumes exactly one per tick. When a burst arrives after a stall, it skips the oldest samples but keeps any jump.
+- Every snapshot tells the client which input sequence number its player was last simulated with (`ack_input`). A predicting client replays its inputs from that point.
 
-## 地板
+## Tiles
 
-- 被踩到的格子，server 只廣播一次「第幾層的哪一格在第幾輪被踩」（TILE_EVENTS）。
-- 掉落時間是固定的：被踩後 16 輪（約 0.53 秒）。每個 client 都能自己算出它什麼時候掉，不用每一輪傳整張地圖。
-- 剛加入、或同一輪被踩太多格時，改送整張地圖（TILES：每格 1 bit，651 格只要 82 bytes）。
+- When a tile is stepped on, the server broadcasts once that this tile on this floor was touched at this tick (TILE_EVENTS).
+- A touched tile falls exactly 16 ticks later (about 0.53 s). Every client can work that out, so the whole board never needs to be sent every tick.
+- New clients, and ticks where too many tiles were touched for one event message, get the whole board instead (TILES: one bit per tile, 82 bytes for all 651 tiles).
 
-## 檔案
+## Files
 
-| 檔案 | 內容 |
+| File | Contents |
 |---|---|
-| `common/wire.h` | 讀寫 big-endian 的工具，跑超過緩衝區只會設旗標，不會越界 |
-| `common/protocol.[ch]` | 訊息定義、編碼、解碼 |
-| `common/reliable.[ch]` | UDP 可靠性層 |
-| `common/sim.[ch]` | 地圖和物理，server 跟 client 共用 |
-| `common/netsim.[ch]` | 故意掉封包、加延遲，用來測試和 demo |
-| `server/udp.c` | UDP 傳輸：socket、連線表、握手、逾時 |
-| `server/room.c` | 遊戲：大廳、回合、淘汰 |
-| `client/net_client.[ch]` | 電腦端連線核心，機器人和之後的電腦版遊戲共用 |
-| `client/bot.c` | 機器人，也是壓力測試工具 |
-| `web/protocol.js` | 手機端的訊息編解碼，跟 C 版逐 byte 一致 |
+| `common/wire.h` | Big-endian readers and writers; running past a buffer sets a flag and never reads or writes out of bounds |
+| `common/protocol.[ch]` | Message definitions, encoders, decoders |
+| `common/reliable.[ch]` | The UDP reliability layer |
+| `common/sim.[ch]` | Arena and physics, shared by server and clients |
+| `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
+| `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
+| `server/room.c` | The game: lobby, rounds, eliminations |
+| `client/net_client.[ch]` | Desktop networking core, shared by bots and the desktop client |
+| `client/bot.c` | Headless bots, also a load generator |
+| `web/protocol.js` | Browser codec, byte-for-byte compatible with the C one |
 
-## 第二階段：加上 WebSocket（手機）要做的事
+## Adding the WebSocket transport
 
-1. `server/ws.c`：在同一個 `poll()` 裡多開一個 TCP listen socket。
-2. 每條 TCP 連線要有自己的接收緩衝和傳送緩衝：TCP 是位元組串流，一次 `recv()` 可能只收到半個封包，也可能收到好幾個。
-3. 最小 HTTP：只處理 `GET`（送網頁和 JS 檔）和 WebSocket 升級握手（`Sec-WebSocket-Accept` 要用 SHA-1 和 Base64）。
-4. WebSocket 封包：三種長度表示法、client 送來的資料要解遮罩、ping、pong、close。
-5. `conn_send()` 加上 `TRANSPORT_WEBSOCKET` 這個分支：每則訊息包成一個 binary frame 送出；傳送緩衝塞住時丟掉不可靠的訊息。
-6. HELLO、WELCOME 這些訊息完全不用改，`room.c` 一行都不用動。
+1. `server/ws.c`: a TCP listening socket in the same `poll()` loop.
+2. Per-connection receive and send buffers: TCP is a byte stream, so one `recv()` may return half a frame or several frames.
+3. A minimal HTTP/1.1 handler for two requests only: `GET` for the page and its scripts, and the WebSocket upgrade handshake (`Sec-WebSocket-Accept` needs SHA-1 and Base64).
+4. WebSocket framing: the three payload-length encodings, unmasking client frames, ping, pong and close.
+5. A `TRANSPORT_WEBSOCKET` branch in `conn_send()`: each message becomes one binary frame; when the send buffer backs up, unreliable messages are dropped.
+6. No message changes and no change to `room.c`.
 
-## 接下來（第一階段剩下的）
+## Next steps
 
-- [ ] 電腦版遊戲 client（raylib）：用 `net_client` 連線，畫 3D 地板和豆子
-- [ ] client 預測自己的角色，收到快照後依 `ack_input` 校正
-- [ ] 別人的角色用內插顯示
-- [ ] 對時（PING/PONG 已經有了），延遲補償判定跳躍
-- [ ] 機器人支援斷線重連測試（帶 resume token 重新 HELLO）
-- [ ] 監控面板：每條連線的 RTT、重送數、掉封包率
+- [ ] Desktop client (raylib) on top of `net_client`
+- [ ] Client-side prediction of the local player, reconciled with `ack_input`
+- [ ] Interpolation of remote players
+- [ ] Clock synchronisation from PING/PONG, and lag compensation for jumps
+- [ ] Reconnect testing with bots (HELLO with a resume token)
+- [ ] Monitoring panel: RTT, resends and loss per connection

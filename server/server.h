@@ -14,8 +14,8 @@
 #define RECONNECT_GRACE_MS 15000   /* a lost player's slot is kept this long */
 
 /* One client connection, whatever carries it. The room only ever calls
- * conn_send(); how a message travels is the transport's business. Phase 2
- * adds TRANSPORT_WEBSOCKET next to UDP without touching room.c. */
+ * conn_send(); how a message travels is the transport's business. The
+ * WebSocket transport is added next to UDP without touching room.c. */
 typedef enum { TRANSPORT_UDP = 0, TRANSPORT_WEBSOCKET = 1 } transport_kind;
 
 typedef struct conn {
