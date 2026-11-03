@@ -70,16 +70,15 @@
  * to guess, and those frames are what a bigger delay avoids. It guesses
  * with the game's own physics (sim_body_step, the server's code) from the
  * newest snapshot it has, on the board as it was then. What nobody can
- * know is what each player pressed meanwhile, so the guess picks one of:
+ * know is what each player pressed meanwhile. In the air that does not
+ * matter: the stick does nothing there (sim.c), so a jump or a fall
+ * follows its arc whatever was pressed, and lands on, or falls through,
+ * the tiles that are there. On the floor the guess picks one of:
  *
- *   GUESS_LET_GO  they let go of the stick (the default). Someone running
- *                 slides to a stop within a quarter of a second; someone
- *                 in the air carries on along the arc, because gravity is
- *                 the same for everybody and in the air the stick only
- *                 steers a little (sim.c: ACCEL_AIR is a third of
- *                 ACCEL_GROUND). They land on, or fall through, the tiles
- *                 that are there.
- *   GUESS_KEEP    they hold the stick as they were moving.
+ *   GUESS_KEEP    they hold the stick as they were moving (the default;
+ *                 players mostly run one way for a while).
+ *   GUESS_LET_GO  they let go of the stick: someone running slides to a
+ *                 stop within a quarter of a second.
  *   GUESS_FREEZE  they stand exactly where they were, mid-air or not.
  *
  * After INTERP_GUESS_MS the screen stops guessing and waits (the renderer
@@ -110,7 +109,7 @@
 #define INTERP_TELEPORT 4.0f         /* farther than this per tick is a jump, not a move */
 
 typedef enum { INTERP_NONE, INTERP_FIXED, INTERP_ADAPTIVE, INTERP_MODES } interp_mode;
-typedef enum { GUESS_LET_GO, GUESS_KEEP, GUESS_FREEZE, GUESS_MODES } interp_guess;
+typedef enum { GUESS_KEEP, GUESS_LET_GO, GUESS_FREEZE, GUESS_MODES } interp_guess;
 
 /* What to draw: the players at one moment of server time. */
 typedef struct {

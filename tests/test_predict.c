@@ -8,8 +8,9 @@
 #include "predict.h"
 
 /* Prediction against a server and a network of the test's own. The server
- * plays by the room's rules for one player: the same input queue
- * (input_queue.c), the same physics (sim.c), tiles that fall, and a
+ * plays by the room's rules: our player with the same input queue
+ * (input_queue.c), maybe one other player holding a fixed stick, the same
+ * physics (sim.c) including pushing players apart, tiles that fall, and a
  * snapshot after every tick, encoded and decoded as on the wire. The
  * network delays, jitters (so reorders) and loses packets both ways. The
  * client sends an input every tick and draws at 60 Hz. Time is simulated,
@@ -24,6 +25,7 @@
     } while (0)
 
 #define ME 7
+#define OTHER 3  /* comes first in the server's order */
 #define TICK_MS (1000.0 / SIM_TICK_HZ)
 #define FRAME_MS (1000.0 / 60)
 #define FLIGHT 4096
@@ -45,6 +47,9 @@ static uint32_t seed = 4242;
 static struct {
     sim_body body;
     inputq q;
+    int has_other;
+    sim_body other;
+    sim_input other_in;
     sim_arena arena;
     uint32_t tick;
     double next_ms;
@@ -84,25 +89,42 @@ static void on_touch(void *ctx, int layer, int q, int r)
                                  .tick = S.tick};
 }
 
+static snap_player on_wire(uint16_t id, const sim_body *b)
+{
+    float turns = b->facing / 6.2831853f;
+    return (snap_player){
+        .id = id, .x = fixed(b->x), .y = fixed(b->y), .z = fixed(b->z),
+        .vx = fixed(b->vx), .vy = fixed(b->vy), .vz = fixed(b->vz),
+        .facing = (uint16_t)((uint32_t)lrintf((turns - floorf(turns)) * 65536.0f) & 0xFFFF),
+        .flags = (uint8_t)((b->grounded ? SP_GROUNDED : 0) | (b->alive ? SP_ALIVE : 0)),
+        .layer = (uint8_t)b->layer,
+    };
+}
+
 static void server_tick(void)
 {
     S.tick++;
+    sim_body *alive[2];
+    int n = 0;
+    if (S.has_other && S.other.alive) {
+        sim_body_step(&S.other, &S.other_in, &S.arena, S.tick, on_touch, NULL);
+        if (S.other.alive)
+            alive[n++] = &S.other;
+    }
     sim_input in = inputq_next(&S.q);
     sim_body_step(&S.body, &in, &S.arena, S.tick, on_touch, NULL);
+    if (S.body.alive)
+        alive[n++] = &S.body;
+    sim_separate(alive, n);
     if (S.tick == S.push_at)
-        S.body.x += 1.5f;  /* as if another player had shoved us */
+        S.body.x += 1.5f;  /* as if something we cannot know of had shoved us */
     if (!S.no_falls)
         sim_arena_tick(&S.arena, S.tick);
 
-    msg_snapshot m = {.tick = S.tick, .ack_input = S.q.applied, .count = 1};
-    float turns = S.body.facing / 6.2831853f;
-    m.p[0] = (snap_player){
-        .id = ME, .x = fixed(S.body.x), .y = fixed(S.body.y), .z = fixed(S.body.z),
-        .vx = fixed(S.body.vx), .vy = fixed(S.body.vy), .vz = fixed(S.body.vz),
-        .facing = (uint16_t)((uint32_t)lrintf((turns - floorf(turns)) * 65536.0f) & 0xFFFF),
-        .flags = (uint8_t)((S.body.grounded ? SP_GROUNDED : 0) | (S.body.alive ? SP_ALIVE : 0)),
-        .layer = (uint8_t)S.body.layer,
-    };
+    msg_snapshot m = {.tick = S.tick, .ack_input = S.q.applied};
+    if (S.has_other)
+        m.p[m.count++] = on_wire(OTHER, &S.other);
+    m.p[m.count++] = on_wire(ME, &S.body);
     uint8_t buf[HF_MAX_MSG];
     wbuf wb;
     wb_init(&wb, buf, sizeof buf);
@@ -233,6 +255,7 @@ static void start(double delay, double jitter, double lost, int moving, int fall
     sim_body_spawn(&S.body, 0, 0);
     inputq_clear(&S.q);
     S.push_at = 0;
+    S.has_other = 0;
     S.no_falls = !falls;
     world_init(&w);
     w.welcomed = 1;
@@ -281,6 +304,20 @@ static void rounds(int n, double seconds, double delay, double jitter, double lo
     frames_on_solid = on_solid;
 }
 
+/* Another player, holding the stick one way all along. */
+static void add_other(float x, float z, float mx, float mz)
+{
+    S.has_other = 1;
+    sim_body_spawn(&S.other, x, z);
+    S.other_in = (sim_input){.mx = mx, .mz = mz};
+}
+
+static float gap_to_other(void)
+{
+    float dx = S.other.x - S.body.x, dz = S.other.z - S.body.z;
+    return sqrtf(dx * dx + dz * dz);
+}
+
 static void report(const char *what)
 {
     printf("%-30s %5llu snapshots, %4llu corrections (%.2f on average, %.2f at most), largest step %.2f\n", what,
@@ -325,12 +362,13 @@ int main(void)
 
     /* A bad network: inputs come late or bunched up, so the server
      * sometimes has to reuse the old stick or skip inputs, and the
-     * prediction is off. Corrections are small and smoothed out: the bean
-     * never jumps on screen. */
-    rounds(6, 10, 30, 60, 0.05);
+     * prediction is off; if that happens as we jump, for the whole jump,
+     * since nothing steers in the air. Corrections are smoothed out: the
+     * bean never jumps on screen. */
+    rounds(8, 10, 30, 60, 0.05);
     report("30-90 ms each way, 5% lost:");
     CHECK(total.snapshots > 1000 && total.corrections > 0);
-    CHECK(total.sum / (double)total.corrections < 0.3);
+    CHECK(total.sum / (double)total.corrections < 0.5);
     CHECK(largest_step < 0.4f);
 
     /* A shove the client could not know about: one big correction, shown
@@ -342,6 +380,40 @@ int main(void)
     printf("%-30s %.2f\n", "a shove of 1.5, corrected by:", pr.correction_max);
     CHECK(pr.corrections == 1 && pr.correction_max > 1.4 && pr.correction_max < 1.6);
     CHECK(largest_step < 0.4f && fabsf(pr.shown.x - S.body.x) < 0.05f);
+
+    /* Running into another player. The client plays the bump itself, the
+     * other player included, so what the server does next was foreseen:
+     * no correction, though we are pushed and push. */
+    start(25, 0, 0, 0, 0);
+    add_other(0, -6, 0, 0);
+    run(0.5);
+    keys.mz = -127;
+    float closest = 99;
+    for (int i = 0; i < 1500; i++) {
+        run(0.001);
+        closest = fminf(closest, gap_to_other());
+    }
+    printf("%-30s %llu corrections, %.2f at most; closest %.2f\n", "running into a player:",
+           (unsigned long long)pr.corrections, pr.correction_max, closest);
+    CHECK(closest < 2 * SIM_BODY_RADIUS + 0.05f && S.other.z < -7);
+    CHECK(pr.correction_max < 0.25);
+    CHECK(pr.other_count == 1 && fabsf(pr.others[0].body.z - S.other.z) < 0.5f);
+
+    /* Head-on into a player running at us: the guess has it keep running,
+     * which it does, so this bump is foreseen too. */
+    start(25, 0, 0, 0, 0);
+    add_other(0, -12, 0, 1);
+    run(0.3);
+    keys.mz = -127;
+    closest = 99;
+    for (int i = 0; i < 2000; i++) {
+        run(0.001);
+        closest = fminf(closest, gap_to_other());
+    }
+    printf("%-30s %llu corrections, %.2f at most; closest %.2f\n", "head-on into a runner:",
+           (unsigned long long)pr.corrections, pr.correction_max, closest);
+    CHECK(closest < 2 * SIM_BODY_RADIUS + 0.05f);
+    CHECK(pr.correction_max < 0.5);
 
     /* Standing still until the tile gives way: the tile is drawn gone on
      * the very frame our bean starts to fall, not `delay` ms later. */

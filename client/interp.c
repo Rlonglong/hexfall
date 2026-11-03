@@ -20,8 +20,8 @@ const char *interp_mode_name(interp_mode mode)
 const char *interp_guess_name(interp_guess guess)
 {
     switch (guess) {
-    case GUESS_LET_GO: return "let go";
     case GUESS_KEEP: return "keep going";
+    case GUESS_LET_GO: return "let go";
     case GUESS_FREEZE: return "freeze";
     default: return "?";
     }

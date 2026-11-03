@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "interp.h"
 #include "protocol.h"
 #include "sim.h"
 #include "world.h"
@@ -42,16 +43,32 @@
  * The jump cooldown is not in a snapshot. It comes from our own
  * prediction for input A, and the replay carries it on from there.
  *
- * Tiles. Our bean lives in the present and the others in the past, so a
- * tile cannot be right for both. Drawn at the playout moment, a tile would
- * light up `delay` ms after we step on it, and could still be drawn while
- * our bean falls through it. So the tiles our bean has been on are drawn
- * at our present moment (predict_tile): lit as soon as we step on them,
- * before the server says so, and falling when the server says they fall,
- * never on our word alone. If the server has not agreed within
- * PREDICT_UNCONFIRMED ticks that we touched one, it goes back to how the
- * server sees it. All other tiles are drawn at the playout moment, with
- * the players on them.
+ * Bumping into others. The server pushes players apart when they meet
+ * (sim_separate). For a bump to happen on screen the moment it happens,
+ * and for the prediction to agree with the server about it, the others
+ * have to be predicted too. So from the newest snapshot the client plays
+ * the server's ticks for everybody up to our present: our inputs for us;
+ * for each of the others, the stick held as they were moving (the
+ * screen's default guess, interp.h; in the air nothing they press
+ * matters); then everybody pushed apart, in the server's order.
+ *
+ * That gives the others two moments: the playout past (interp.h), where
+ * every position is real, and our present, which is partly a guess. Far
+ * from our bean the past is drawn, as in step 2. Closer than PREDICT_NEAR
+ * the present is drawn, so what our bean bumps into is where it is drawn;
+ * between PREDICT_NEAR and PREDICT_FAR, a mix (predict_scene). When a
+ * snapshot shows a guess was wrong, the change is smoothed out like our
+ * own corrections.
+ *
+ * Tiles. A tile cannot be right for two moments either. Drawn at the
+ * playout moment, a tile would light up `delay` ms after we step on it,
+ * and could still be drawn while our bean falls through it. So the tiles
+ * our bean has been on, and the tiles near it, are drawn at our present
+ * moment (predict_tile): lit as soon as we step on them, before the server
+ * says so, and falling when the server says they fall, never on our word
+ * alone. If the server has not agreed within PREDICT_UNCONFIRMED ticks
+ * that we touched one, it goes back to how the server sees it. Tiles far
+ * away are drawn at the playout moment, with the players on them.
  *
  * Main thread only; no sockets, no raylib. tests/test_predict.c runs it
  * against a server and network of its own making. */
@@ -62,6 +79,8 @@
 #define PREDICT_SNAP 4.0f        /* a correction bigger than this is not smoothed */
 #define PREDICT_UNCONFIRMED 20   /* ticks a tile we stepped on waits for the server to agree */
 #define PREDICT_NOISE 0.02       /* corrections smaller than this are rounding (positions travel in 1/100 units) */
+#define PREDICT_NEAR 6.0f        /* others this close to our bean are drawn at our moment... */
+#define PREDICT_FAR 10.0f        /* ...and from this far on at the playout moment */
 
 typedef struct {
     int used;
@@ -69,6 +88,12 @@ typedef struct {
     sim_input in;
     sim_body after;  /* our body once the server has used this input, as predicted */
 } predict_step;
+
+typedef struct {
+    uint16_t id;
+    sim_body body;              /* at our present, as far as we can tell */
+    float off_x, off_y, off_z;  /* a change of guess still fading out */
+} predict_other;
 
 typedef struct {
     int enabled;  /* off: our bean is drawn like everybody else's (step 2) */
@@ -83,6 +108,11 @@ typedef struct {
 
     float off_x, off_y, off_z;  /* a correction still fading out */
 
+    /* Everybody else, in the server's order (the snapshot's); our own place
+     * in that order is me_slot. */
+    predict_other others[HF_MAX_PLAYERS];
+    int other_count, me_slot;
+
     /* Tiles our bean has been on (at the height of the floor): the tick it
      * first was, 0 = never; and whether it stood there, which touches it. */
     uint32_t mine[SIM_LAYERS][SIM_TILES];
@@ -92,7 +122,8 @@ typedef struct {
      * (otherwise our bean comes from the interpolation like the others). */
     int shown_valid;
     world_body shown;
-    double shown_tick;  /* the present, fractional */
+    world_body shown_others[HF_MAX_PLAYERS];  /* the others at our moment, in the order of `others` */
+    double shown_tick;                        /* the present, fractional */
 
     /* Since enabled. */
     int ahead;  /* inputs the server had not used yet, at the newest snapshot */
@@ -112,6 +143,10 @@ void predict_input(predict *pr, const world *w, const input_sample *s);
 /* Once per frame. `keys` is the input as it would be sent now, `frac` how
  * far it is (0..1) from the last input tick to the next. */
 void predict_frame(predict *pr, const world *w, const input_sample *keys, double frac, double dt_ms);
+
+/* The scene to draw: `past` (the interpolation's view) with our own bean
+ * where we predict it, and the others near it moved to our moment. */
+void predict_scene(const predict *pr, const world *w, const interp_view *past, interp_view *out);
 
 /* How to draw a tile: judge `*t` at moment `*at` (with interp_tile_state). */
 void predict_tile(const predict *pr, const world *w, int layer, int index, double playout_tick, sim_tile *t,

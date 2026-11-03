@@ -9,7 +9,6 @@ const float SIM_LAYER_Y[SIM_LAYERS] = {0.0f, -12.0f, -24.0f};
 #define GRAVITY 40.0f
 #define JUMP_SPEED 13.0f
 #define ACCEL_GROUND 34.0f
-#define ACCEL_AIR 12.0f
 #define JUMP_COOLDOWN_TICKS 9
 #define WORLD_LIMIT 60.0f
 #define SQRT3 1.7320508f
@@ -163,9 +162,14 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         mx /= len;
         mz /= len;
     }
-    float accel = (b->grounded ? ACCEL_GROUND : ACCEL_AIR) * DT;
-    b->vx += clampf(mx * SIM_MAX_SPEED - b->vx, -accel, accel);
-    b->vz += clampf(mz * SIM_MAX_SPEED - b->vz, -accel, accel);
+    /* Only on the floor. In the air the stick does nothing: a jump goes
+     * where the bean was heading when it left the floor, whatever the
+     * player (or the camera) does on the way. */
+    if (b->grounded) {
+        float accel = ACCEL_GROUND * DT;
+        b->vx += clampf(mx * SIM_MAX_SPEED - b->vx, -accel, accel);
+        b->vz += clampf(mz * SIM_MAX_SPEED - b->vz, -accel, accel);
+    }
     b->x = clampf(b->x + b->vx * DT, -WORLD_LIMIT, WORLD_LIMIT);
     b->z = clampf(b->z + b->vz * DT, -WORLD_LIMIT, WORLD_LIMIT);
     if (b->jump_cooldown > 0)

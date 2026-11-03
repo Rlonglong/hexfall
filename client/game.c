@@ -154,7 +154,7 @@ static int parse_mode(const char *s, interp_mode *out)
 
 static int parse_guess(const char *s, interp_guess *out)
 {
-    static const char *names[GUESS_MODES] = {"let-go", "keep", "freeze"};
+    static const char *names[GUESS_MODES] = {"keep", "let-go", "freeze"};
     for (int g = 0; g < GUESS_MODES; g++)
         if (!strcmp(s, names[g])) {
             *out = (interp_guess)g;
@@ -178,7 +178,7 @@ static void usage(const char *argv0)
 {
     fprintf(stderr,
             "usage: %s [--host H] [--port P] [--name NAME]\n"
-            "          [--interp none|fixed|adaptive] [--guess let-go|keep|freeze] [--predict on|off]\n"
+            "          [--interp none|fixed|adaptive] [--guess keep|let-go|freeze] [--predict on|off]\n"
             "          [--inbound DELAY:JITTER[:LOSS%%]]\n"
             "          [--auto-ready] [--autopilot] [--screenshot FILE --after SEC]...   (unattended checks)\n",
             argv0);
@@ -190,7 +190,7 @@ int main(int argc, char **argv)
     const char *name = getenv("USER") ? getenv("USER") : "player";
     int auto_ready = 0, auto_keys = 0, shots = 0, shots_taken = 0, bad_network = 0, predicting = 1;
     interp_mode mode = INTERP_ADAPTIVE;
-    interp_guess guess = GUESS_LET_GO;
+    interp_guess guess = GUESS_KEEP;
     netsim_cfg inbound = BAD_NETWORKS[0];
     timed_shot shot[8];
     for (int i = 1; i < argc; i++) {
