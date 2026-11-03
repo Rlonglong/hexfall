@@ -65,16 +65,59 @@ What no NTP-style method can correct is a *constant* asymmetry, where one direct
 The main thread runs one loop per frame, in this order:
 
 1. **Drain the channels.** Every reliable event and every new snapshot is applied to `world` (`client/world.c`), the client's copy of the game built only from server messages. A snapshot older than the newest one already applied is counted as late and skipped. Touched tiles fall when the snapshot's tick passes their moment, so the board's timing follows the server's clock, not the client's.
-2. **Read the keyboard.** Inputs are sent at the server's tick rate (30 per second) whatever the frame rate, each packet carrying the last four samples so a lost packet costs nothing. A jump pressed between two input ticks is latched until the next one. The camera always faces the same way, so W is always "away from the camera" and needs no conversion.
+2. **Read the keyboard.** Inputs are sent at the server's tick rate (30 per second) whatever the frame rate, each packet carrying the last four samples so a lost packet costs nothing. A jump pressed between two input ticks is latched until the next one. W is always "away from the camera", and the camera can be turned (drag with the mouse, or hold Q/E), so the keys are turned by the camera's angle before they are sent. The server only ever sees world directions, and prediction (step 3) can replay the same samples whatever the camera did meanwhile.
 3. **Draw** (`client/render.c`). The renderer reads the world and the network status and changes neither. Our own bean moves only when a snapshot says so, which is the point of this step: with a 60 Hz screen and 30 snapshots per second every bean visibly steps, and our own moves wait a full round trip. Steps 2 and 3 fix exactly these two things.
 
-What the renderer adds is cosmetic only: the camera follows our bean (C switches to a view of the whole floor), beans turn smoothly and lean when they run, touched tiles shake, and falling tiles and knock-outs throw a few particles. Floors above the one being watched fade out. Player names may use any script: the font atlas is rebuilt when a name brings characters it does not have yet. The font is found on the system (macOS and common Linux paths) or set with `HEXFALL_FONT`; without one, raylib's built-in font is used.
+What the renderer adds is cosmetic only: the camera follows our bean (C switches to a view of the whole floor), beans turn smoothly and lean when they run, touched tiles shake, and falling tiles and knock-outs throw a few particles. Floors above the one being watched fade out. Our own name tag is always shown; of the others, only the four nearest on the same floor (or, while watching, nearest to where the camera looks), so a full room stays readable. Player names may use any script: the font atlas is rebuilt when a name brings characters it does not have yet. The font is found on the system (macOS and common Linux paths) or set with `HEXFALL_FONT`; without one, raylib's built-in font is used.
 
-The network panel (F1) shows the connection state, round-trip time and jitter, clock sync, packet and resend counts, and the age of the snapshot on screen.
+The network panel (F1) shows the connection state, round-trip time and jitter, clock sync, packet and resend counts, and, from step 2 on, how snapshots arrive and how the screen copes.
+
+## Step 2: interpolation
+
+![Watching from above on a simulated bad network: the adaptive delay has grown to 217 ms, and 0.4% of frames had to extrapolate](img/client-step2.jpg)
+
+**The problem.** The server sends a snapshot after every tick, 30 per second. On a real network they do not arrive every 33.3 ms: each spends a different time on the way (jitter), some never arrive (snapshots are never resent), and a late one can arrive after a newer one. Step 1 draws the newest snapshot the moment it arrives, so players freeze while nothing comes and then jump. Even on a perfect network they move in visible steps, because a 60 Hz screen shows each snapshot for two frames.
+
+**The idea.** `client/interp.c` keeps the last 64 snapshots (about 2 s) and draws the game as it was a short time ago, at the *playout* time. Each player is placed between the two snapshots on either side of that moment, so players move smoothly even when snapshots arrive in clumps. A snapshot that arrives out of order still fills its place, as long as the playout has not passed it. This is the jitter buffer of internet voice and video, applied to game state. The price is that everything is drawn a little behind the newest news; step 3 takes that price back for our own player.
+
+**Timing, without clock sync.** The server sends tick `k` at `T0 + k × 33.3 ms` on its own clock. A snapshot that arrives at local time `arrival_k` spent `transit_k` on the way, plus a constant that never matters because only differences are used:
+
+```
+transit_k = arrival_k - k × 33.3 ms
+late_k    = transit_k - (smallest transit among the last 64)      how much later than the fastest trip
+playout   = (now - smallest transit - delay) / 33.3 ms            the tick to draw, fractional
+```
+
+Drawing any moment between ticks `k-1` and `k` needs snapshot `k`, so it must arrive before the playout reaches `k-1`: that holds when `late_k ≤ delay - 33.3 ms`. If snapshot `k` is lost, `k+1` has to do instead, which takes one more tick. Arrival times are stamped by the network thread, so a slow frame on the main thread does not count as network jitter.
+
+**Three modes,** switched with I while playing:
+
+| Mode | Delay | |
+|---|---|---|
+| none | 0 | The newest snapshot as it is (step 1), for comparison |
+| fixed | 100 ms | Three ticks, whatever the network does; a common default in shipped games |
+| adaptive | 33.3 ms × (1 + lost in a row, at most 2) + `late_k` at the 95th percentile + 5 ms | Goes up at once when the network gets worse, comes down by 20 ms per second when it gets better, so occasional bad seconds do not make it swing |
+
+**The playout clock never jumps.** It runs with real time, and when the delay or the smallest transit changes it runs up to 10% faster or slower until it is where it should be (it only jumps when it is more than 250 ms off, as at the start). If the snapshot after the playout time has not arrived, players carry on along their last velocity for at most 100 ms, then stop. Those extrapolated frames are guesses: a bean that turned meanwhile is pulled back when the real snapshot arrives. Avoiding them is what a larger delay buys.
+
+**One moment for the whole scene.** Tiles light up and fall at the playout tick too (each touched tile falls 16 ticks after its touch, which the client works out by itself), and a knock-out notice waits until the playout reaches its tick. Otherwise a tile would vanish from under a bean that, on screen, has not reached it yet.
+
+**Measured.** A server, 10 bots and the client on one machine, 14 s per mode, with received packets delayed by 40 to 160 ms and 5% of them lost (`--inbound 40:120:5`):
+
+| Mode | Drawn behind | Frames extrapolated | Snapshots that came too late | Stutter |
+|---|---|---|---|---|
+| none | 0 ms | – | – | 25.2 ms |
+| fixed | 100 ms | 14.1% | 125 of 402 | 0.07 ms |
+| adaptive | 208 ms | 0.0% | 0 of 398 | 0.46 ms |
+
+*Stutter* is the average, per frame, of how much the moment shown moved differently from real time; on a smooth screen it is 0. With no smoothing it stays high even on a perfect network (15.8 ms in the simulated test), because players move in 33 ms steps. The fixed delay looks smooth by this measure only because extrapolation keeps players moving; one frame in seven is a guess. With no simulated disturbance the adaptive delay settles at 39 to 41 ms, well under the fixed 100 ms, so it is both smoother on a bad network and more responsive on a good one.
+
+**Trying it.** I cycles none, fixed and adaptive (each switch restarts the panel's counters). N cycles the simulated bad network on received packets: off, 20 to 80 ms, and 40 to 160 ms with 5% lost. The network thread applies it (`net_set_inbound`), so one client can see a bad network without changing the server. From the command line: `--interp none|fixed|adaptive` and `--inbound DELAY:JITTER[:LOSS%]`. On exit the client logs the mode's figures, as in the table above.
 
 ## Testing
 
 - `tests/test_world.c`: the client's game state fed the messages a server would send, including a late snapshot, a tile that falls on time, a knock-out, and a second WELCOME after a resync.
+- `tests/test_interp.c`: interpolation against a simulated server, network and 60 Hz screen, with simulated time so the result does not depend on the machine. On a perfect network the fixed delay is exactly three ticks with no extrapolation, the adaptive one just over one tick, and no smoothing stutters. On a bad network (40 to 160 ms, 5% lost) the fixed delay extrapolates in more than 10% of frames and the adaptive one in under 3%. In every frame the player is drawn exactly where it was at the moment shown. Also: the adaptive delay comes down slowly once the network recovers, a teleport is not slid across, a server restart starts the history over, and tiles are shown as they were at a given moment.
 - `tests/test_msg_queue.c`: a producer and a consumer thread move 300,000 messages through the FIFO (with capacity 1 and 64) and the ring; nothing is lost, duplicated or reordered.
 - `tests/test_clock_sync.c`: lopsided simulated round trips across a 32-bit wrap-around; the estimate stays within 3 ms.
 - `tests/stress_net.sh` (`make stress`): a server, bots, and 16 probes, each with its own network thread, which freeze for 4 seconds every round with a 48-message event queue while 5% of received packets are lost and the rest jittered. The probes check that every probe ends up connected, reliable events never arrive out of order or before the board, every stall led to a resync, and all clock offsets agree.
@@ -97,5 +140,6 @@ Two bugs that unit tests did not catch, both now covered by the stress test:
 | `client/clock_sync.[ch]` | Clock synchronisation, pure functions |
 | `client/netprobe.c` | Headless stand-in for the main thread; the stress test |
 | `client/world.[ch]` | The client's game state, built only from server messages |
+| `client/interp.[ch]` | Snapshot interpolation: the history, the playout clock, the three modes |
 | `client/render.[ch]` | Drawing with raylib: scene, camera, HUD, network panel |
-| `client/game.c` | The desktop client's main loop: channels, keyboard, inputs, drawing |
+| `client/game.c` | The desktop client's main loop: channels, keyboard and mouse, inputs, drawing |
