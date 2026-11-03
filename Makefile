@@ -8,10 +8,10 @@ LDLIBS  += -lm -lpthread
 COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c
 NETCLI  := client/net_client.c
 NETTHR  := client/net_thread.c client/msg_queue.c client/clock_sync.c $(NETCLI)
-WORLD   := client/world.c
+WORLD   := client/world.c client/interp.c
 SERVER  := server/main.c server/udp.c server/room.c
 HEADERS := $(wildcard common/*.h server/*.h client/*.h)
-TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/golden
+TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/test_interp build/golden
 
 # The desktop client needs raylib (brew install raylib / apt install libraylib-dev);
 # everything else builds without it.
@@ -52,6 +52,7 @@ test: $(TESTS)
 	./build/test_msg_queue
 	./build/test_clock_sync
 	./build/test_world
+	./build/test_interp
 	./build/golden build/golden.bin
 	node tests/test_protocol_js.mjs build/golden.bin
 

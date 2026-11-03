@@ -10,8 +10,8 @@
 /* What the client knows about the game, built only from server messages:
  * the room, the board and the latest snapshot. No drawing and no sockets
  * here, so it can be tested on its own and every renderer reads the same
- * state. Step 1 shows the latest snapshot as is; interpolation and
- * prediction will add their own views on top. */
+ * state. This is always the newest news; interp.c decides which moment of
+ * it is drawn, and prediction (step 3) will add its own view on top. */
 
 #define WORLD_FEED 5
 
@@ -27,14 +27,24 @@ typedef struct {
     int grounded, alive, layer;
 } world_body;
 
-/* Something worth telling the player. Knock-outs keep who and where, so a
- * renderer can show them its own way; anything else is plain text. */
+/* One SNAPSHOT, decoded. */
+typedef struct {
+    uint32_t tick;
+    uint16_t ack_input;
+    int count;
+    world_body bodies[HF_MAX_PLAYERS];
+} world_snapshot;
+
+/* Something worth telling the player. Knock-outs keep who, where and when,
+ * so a renderer can show them its own way and at the right moment; anything
+ * else is plain text. */
 typedef struct {
     char text[64];
     uint64_t at_ms;
     int knockout;
     uint16_t player;
     uint8_t place;
+    uint32_t tick;  /* the server tick it happened at (knock-outs) */
 } world_note;
 
 typedef struct {
@@ -68,8 +78,12 @@ void world_init(world *w);
  * from what the server sends next. */
 void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms);
 
-/* A snapshot from the snapshot channel; older than the newest one is ignored. */
-void world_apply_snapshot(world *w, const uint8_t *msg, size_t len, uint64_t arrived_ms);
+/* A message from the snapshot channel; 0 if it is not a well-formed SNAPSHOT. */
+int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out);
+
+/* Takes a snapshot as the newest news, unless a newer one came first (then
+ * it is only counted as late; interp.c may still have a use for it). */
+void world_apply_snapshot(world *w, const world_snapshot *s, uint64_t arrived_ms);
 
 const world_player *world_player_by_id(const world *w, uint16_t id);
 const world_body *world_body_by_id(const world *w, uint16_t id);

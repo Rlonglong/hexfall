@@ -138,6 +138,7 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         n->knockout = 1;
         n->player = m.player_id;
         n->place = m.place;
+        n->tick = m.tick;
         break;
     }
     case MSG_ERROR: {
@@ -154,26 +155,20 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
     }
 }
 
-void world_apply_snapshot(world *w, const uint8_t *msg, size_t len, uint64_t arrived_ms)
+int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out)
 {
     rbuf r, p;
     uint8_t type;
     static msg_snapshot m;  /* main thread only */
     rb_init(&r, msg, len);
     if (!hf_next_msg(&r, &type, &p) || type != MSG_SNAPSHOT || !hf_get_snapshot(&p, &m))
-        return;
-    if (w->have_snapshot && (int32_t)(m.tick - w->tick) <= 0) {
-        w->snapshots_late++;  /* overtaken by a newer one on the way */
-        return;
-    }
-    w->have_snapshot = 1;
-    w->tick = m.tick;
-    w->snapshot_at_ms = arrived_ms;
-    w->ack_input = m.ack_input;
-    w->body_count = m.count;
+        return 0;
+    out->tick = m.tick;
+    out->ack_input = m.ack_input;
+    out->count = m.count;
     for (int i = 0; i < m.count; i++) {
         const snap_player *s = &m.p[i];
-        world_body *b = &w->bodies[i];
+        world_body *b = &out->bodies[i];
         b->id = s->id;
         b->x = s->x / HF_POS_SCALE;
         b->y = s->y / HF_POS_SCALE;
@@ -186,6 +181,21 @@ void world_apply_snapshot(world *w, const uint8_t *msg, size_t len, uint64_t arr
         b->alive = (s->flags & SP_ALIVE) != 0;
         b->layer = s->layer;
     }
-    sim_arena_tick(&w->arena, m.tick);  /* touched tiles whose time is up fall now */
+    return 1;
+}
+
+void world_apply_snapshot(world *w, const world_snapshot *s, uint64_t arrived_ms)
+{
+    if (w->have_snapshot && (int32_t)(s->tick - w->tick) <= 0) {
+        w->snapshots_late++;  /* overtaken by a newer one on the way */
+        return;
+    }
+    w->have_snapshot = 1;
+    w->tick = s->tick;
+    w->snapshot_at_ms = arrived_ms;
+    w->ack_input = s->ack_input;
+    w->body_count = s->count;
+    memcpy(w->bodies, s->bodies, sizeof w->bodies[0] * (size_t)s->count);
+    sim_arena_tick(&w->arena, s->tick);  /* touched tiles whose time is up fall now */
     w->snapshots_used++;
 }

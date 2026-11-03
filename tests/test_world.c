@@ -28,14 +28,17 @@ static size_t welcome(uint16_t id, uint32_t tick)
     return w.len;
 }
 
-static size_t snapshot(uint32_t tick, uint16_t id, float x)
+/* Encoded and decoded again, as the client gets it from the snapshot channel. */
+static const world_snapshot *snapshot(uint32_t tick, uint16_t id, float x)
 {
+    static world_snapshot out;
     msg_snapshot m = {.tick = tick, .count = 1};
     m.p[0] = (snap_player){.id = id, .x = (int16_t)(x * HF_POS_SCALE), .flags = SP_ALIVE | SP_GROUNDED};
     wbuf w;
     wb_init(&w, buf, sizeof buf);
     hf_put_snapshot(&w, &m);
-    return w.len;
+    CHECK(world_decode_snapshot(buf, w.len, &out));
+    return &out;
 }
 
 int main(void)
@@ -76,21 +79,21 @@ int main(void)
 
     /* Snapshots: a newer one is used, an older one that arrives later is not,
      * and the touched tile falls once the server's time passes its moment. */
-    world_apply_snapshot(&w, buf, snapshot(105, 7, 1.5f), 1000);
+    world_apply_snapshot(&w, snapshot(105, 7, 1.5f), 1000);
     CHECK(w.tick == 105 && w.body_count == 1 && world_body_by_id(&w, 7)->x == 1.5f);
-    world_apply_snapshot(&w, buf, snapshot(104, 7, 9.0f), 1001);
+    world_apply_snapshot(&w, snapshot(104, 7, 9.0f), 1001);
     CHECK(w.tick == 105 && world_body_by_id(&w, 7)->x == 1.5f && w.snapshots_late == 1);
     CHECK(w.arena.tiles[0][centre].state == TILE_TOUCHED);
-    world_apply_snapshot(&w, buf, snapshot(101 + SIM_FALL_TICKS, 7, 2.0f), 1002);
+    world_apply_snapshot(&w, snapshot(101 + SIM_FALL_TICKS, 7, 2.0f), 1002);
     CHECK(w.arena.tiles[0][centre].state == TILE_GONE);
 
     /* A knock-out keeps who and where, for the renderer to show its own way. */
-    msg_eliminated ko = {.player_id = 7, .place = 3};
+    msg_eliminated ko = {.player_id = 7, .place = 3, .tick = 130};
     wb_init(&wb, buf, sizeof buf);
     hf_put_eliminated(&wb, &ko);
     world_apply_event(&w, buf, wb.len, 5000);
     CHECK(w.note_count == 1 && w.notes[0].knockout && w.notes[0].player == 7 && w.notes[0].place == 3);
-    CHECK(w.notes[0].at_ms == 5000 && strstr(w.notes[0].text, "#3"));
+    CHECK(w.notes[0].at_ms == 5000 && w.notes[0].tick == 130 && strstr(w.notes[0].text, "#3"));
 
     /* A second WELCOME (after a resync) forgets the old board and bodies,
      * but not what just happened. */
