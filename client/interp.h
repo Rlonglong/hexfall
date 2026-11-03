@@ -64,10 +64,29 @@
  * The playout clock never jumps. It runs with real time, and when the
  * delay or the minimum transit changes it runs up to INTERP_SLEW faster or
  * slower until it is where it should be (unless it is more than
- * INTERP_SNAP_MS off, as at the start). If the snapshot after the playout
- * time has not arrived, players carry on along their last velocity for at
- * most INTERP_EXTRAPOLATE_MS, then stop; those frames are counted, and
- * they are what a bigger delay avoids.
+ * INTERP_SNAP_MS off, as at the start).
+ *
+ * When the snapshot after the playout time has not arrived, the screen has
+ * to guess, and those frames are what a bigger delay avoids. It guesses
+ * with the game's own physics (sim_body_step, the server's code) from the
+ * newest snapshot it has, on the board as it was then. What nobody can
+ * know is what each player pressed meanwhile, so the guess picks one of:
+ *
+ *   GUESS_LET_GO  they let go of the stick (the default). Someone running
+ *                 slides to a stop within a quarter of a second; someone
+ *                 in the air carries on along the arc, because gravity is
+ *                 the same for everybody and in the air the stick only
+ *                 steers a little (sim.c: ACCEL_AIR is a third of
+ *                 ACCEL_GROUND). They land on, or fall through, the tiles
+ *                 that are there.
+ *   GUESS_KEEP    they hold the stick as they were moving.
+ *   GUESS_FREEZE  they stand exactly where they were, mid-air or not.
+ *
+ * After INTERP_GUESS_MS the screen stops guessing and waits (the renderer
+ * shows a spinner): better to stop than to keep making things up. Each time
+ * a snapshot arrives that the screen had to do without, the guess for its
+ * moment is compared with what really happened there, so how wrong the
+ * guesses are can be measured, and the three compared.
  *
  * Everything on screen is shown at the same moment: tiles light up and
  * fall at the playout tick too (interp_tile_state), and the renderer holds
@@ -87,14 +106,16 @@
 #define INTERP_DECAY_MS_PER_S 20.0
 #define INTERP_SLEW 0.10
 #define INTERP_SNAP_MS 250.0
-#define INTERP_EXTRAPOLATE_MS 100.0
-#define INTERP_TELEPORT 4.0f         /* farther than this between two snapshots is a jump, not a move */
+#define INTERP_GUESS_MS 200.0       /* the longest the screen guesses before it stops and waits */
+#define INTERP_TELEPORT 4.0f         /* farther than this per tick is a jump, not a move */
 
 typedef enum { INTERP_NONE, INTERP_FIXED, INTERP_ADAPTIVE, INTERP_MODES } interp_mode;
+typedef enum { GUESS_LET_GO, GUESS_KEEP, GUESS_FREEZE, GUESS_MODES } interp_guess;
 
 /* What to draw: the players at one moment of server time. */
 typedef struct {
     double tick;  /* that moment, in ticks; fractional between snapshots */
+    int guessed;  /* no snapshot after that moment yet: the players are a guess */
     int count;
     world_body bodies[HF_MAX_PLAYERS];
 } interp_view;
@@ -107,6 +128,8 @@ typedef struct {
 
 typedef struct {
     interp_mode mode;
+    interp_guess guess;
+    const sim_arena *board;  /* the world's board, for guessing */
 
     /* The history: the snapshot of tick t lives in slot[t % INTERP_HISTORY]
      * (a slot still holding an older tick counts as empty). Times are kept
@@ -128,18 +151,24 @@ typedef struct {
     int playing;
     uint64_t last_ms;
 
-    /* Since the mode was last set. */
-    uint64_t frames, frames_extrapolated, frames_stopped, snapshots, too_late;
+    double waiting_ms;  /* how long the screen has been stopped, waiting; 0 if it is not */
+
+    /* Since the mode or the guess was last set. */
+    uint64_t frames, frames_guessed, frames_waiting, snapshots, too_late;
     double stutter_ms;  /* moving average of |step of the moment shown - step of real time| per frame */
     double shown_ms;
     int shown_valid;
+    double guess_error_sum, guess_error_max;  /* distance from a guess to what really happened */
+    uint64_t guess_errors;
 
     interp_view view;  /* refreshed by interp_frame() */
 } interp;
 
-void interp_init(interp *ip, interp_mode mode);
-void interp_set_mode(interp *ip, interp_mode mode);  /* keeps the history, restarts the counters */
+void interp_init(interp *ip, interp_mode mode, const sim_arena *board);
+void interp_set_mode(interp *ip, interp_mode mode);    /* keeps the history, restarts the counters */
+void interp_set_guess(interp *ip, interp_guess guess);  /* the same */
 const char *interp_mode_name(interp_mode mode);
+const char *interp_guess_name(interp_guess guess);
 
 /* A snapshot from the network thread, with the time the network thread
  * received it. Any order; duplicates and very old ones are ignored. A tick
@@ -156,5 +185,10 @@ int interp_alive_count(const interp_view *v);
 /* A tile as it was at `tick`: the world knows its newest state and when it
  * was touched, and every touched tile falls SIM_FALL_TICKS later. */
 int interp_tile_state(const sim_tile *t, double tick);
+
+/* The whole board as it was at the end of `tick`. The server moves the
+ * players before it lets tiles fall, so tick k is played on the board at
+ * the end of tick k - 1. */
+void interp_board_at(sim_arena *out, const sim_arena *board, uint32_t tick);
 
 #endif

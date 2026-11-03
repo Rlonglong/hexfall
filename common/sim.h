@@ -22,6 +22,7 @@
 #define SIM_HEX_SIZE 2.0f
 #define SIM_BODY_RADIUS 0.9f
 #define SIM_SLIME_Y (-34.0f)
+#define SIM_MAX_SPEED 8.0f  /* running speed; what the stick asks for at full tilt */
 
 extern const float SIM_LAYER_Y[SIM_LAYERS];
 

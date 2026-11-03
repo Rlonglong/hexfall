@@ -8,7 +8,6 @@ const float SIM_LAYER_Y[SIM_LAYERS] = {0.0f, -12.0f, -24.0f};
 #define DT (1.0f / SIM_TICK_HZ)
 #define GRAVITY 40.0f
 #define JUMP_SPEED 13.0f
-#define MAX_SPEED 8.0f
 #define ACCEL_GROUND 34.0f
 #define ACCEL_AIR 12.0f
 #define JUMP_COOLDOWN_TICKS 9
@@ -165,8 +164,8 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         mz /= len;
     }
     float accel = (b->grounded ? ACCEL_GROUND : ACCEL_AIR) * DT;
-    b->vx += clampf(mx * MAX_SPEED - b->vx, -accel, accel);
-    b->vz += clampf(mz * MAX_SPEED - b->vz, -accel, accel);
+    b->vx += clampf(mx * SIM_MAX_SPEED - b->vx, -accel, accel);
+    b->vz += clampf(mz * SIM_MAX_SPEED - b->vz, -accel, accel);
     b->x = clampf(b->x + b->vx * DT, -WORLD_LIMIT, WORLD_LIMIT);
     b->z = clampf(b->z + b->vz * DT, -WORLD_LIMIT, WORLD_LIMIT);
     if (b->jump_cooldown > 0)

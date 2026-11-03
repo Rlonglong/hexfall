@@ -23,6 +23,12 @@ static world_note *note(world *w, uint64_t now_ms, const char *text)
     return n;
 }
 
+sim_body world_body_to_sim(const world_body *b)
+{
+    return (sim_body){.x = b->x, .y = b->y, .z = b->z, .vx = b->vx, .vy = b->vy, .vz = b->vz,
+                      .facing = b->facing, .grounded = b->grounded, .layer = b->layer, .alive = b->alive};
+}
+
 const world_player *world_player_by_id(const world *w, uint16_t id)
 {
     for (int i = 0; i < w->player_count; i++)

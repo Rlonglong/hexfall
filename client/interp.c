@@ -17,18 +17,42 @@ const char *interp_mode_name(interp_mode mode)
     }
 }
 
-void interp_init(interp *ip, interp_mode mode)
+const char *interp_guess_name(interp_guess guess)
+{
+    switch (guess) {
+    case GUESS_LET_GO: return "let go";
+    case GUESS_KEEP: return "keep going";
+    case GUESS_FREEZE: return "freeze";
+    default: return "?";
+    }
+}
+
+void interp_init(interp *ip, interp_mode mode, const sim_arena *board)
 {
     memset(ip, 0, sizeof *ip);
     ip->mode = mode;
+    ip->board = board;
+}
+
+static void restart_counters(interp *ip)
+{
+    ip->frames = ip->frames_guessed = ip->frames_waiting = ip->snapshots = ip->too_late = 0;
+    ip->stutter_ms = 0;
+    ip->shown_valid = 0;
+    ip->guess_error_sum = ip->guess_error_max = 0;
+    ip->guess_errors = 0;
 }
 
 void interp_set_mode(interp *ip, interp_mode mode)
 {
     ip->mode = mode;
-    ip->frames = ip->frames_extrapolated = ip->frames_stopped = ip->snapshots = ip->too_late = 0;
-    ip->stutter_ms = 0;
-    ip->shown_valid = 0;
+    restart_counters(ip);
+}
+
+void interp_set_guess(interp *ip, interp_guess guess)
+{
+    ip->guess = guess;
+    restart_counters(ip);
 }
 
 /* Server time of a tick, in ms since `base`. */
@@ -92,6 +116,8 @@ static void measure(interp *ip)
     ip->longest_gap = longest;
 }
 
+static void score_guess(interp *ip, const world_snapshot *s);
+
 void interp_add(interp *ip, const world_snapshot *s, uint64_t arrived_ms)
 {
     int32_t ahead = ip->have ? (int32_t)(s->tick - ip->newest) : 0;
@@ -115,8 +141,10 @@ void interp_add(interp *ip, const world_snapshot *s, uint64_t arrived_ms)
     ip->snapshots++;
     /* Needed since the playout passed the tick before it: the screen had to
      * do without it. */
-    if (ip->playing && ip->mode != INTERP_NONE && tick_ms(ip, s->tick) - TICK_MS < ip->playout_ms)
+    if (ip->playing && ip->mode != INTERP_NONE && tick_ms(ip, s->tick) - TICK_MS < ip->playout_ms) {
         ip->too_late++;
+        score_guess(ip, s);
+    }
 
     sl->used = 1;
     sl->arrived_ms = arrived_ms;
@@ -192,8 +220,8 @@ static void blend(interp_view *v, const world_snapshot *a, const world_snapshot 
         *o = *pa;
         if (!pb || pb->alive != pa->alive)
             continue;
-        float dx = pb->x - pa->x, dy = pb->y - pa->y, dz = pb->z - pa->z;
-        if (dx * dx + dy * dy + dz * dz > INTERP_TELEPORT * INTERP_TELEPORT)
+        float dx = pb->x - pa->x, dy = pb->y - pa->y, dz = pb->z - pa->z, most = INTERP_TELEPORT * (float)(b->tick - a->tick);
+        if (dx * dx + dy * dy + dz * dz > most * most)
             continue;  /* a jump in position, not a move: no sliding across */
         o->x = lerpf(pa->x, pb->x, t);
         o->y = lerpf(pa->y, pb->y, t);
@@ -209,30 +237,95 @@ static void blend(interp_view *v, const world_snapshot *a, const world_snapshot 
     }
 }
 
-/* Past the newest snapshot: on along the last velocity. */
-static void extrapolate(interp_view *v, const world_snapshot *a, float seconds)
-{
-    v->count = a->count;
-    for (int i = 0; i < a->count; i++) {
-        world_body *o = &v->bodies[i];
-        *o = a->bodies[i];
-        if (!o->alive)
-            continue;
-        o->x += o->vx * seconds;
-        o->y += o->vy * seconds;
-        o->z += o->vz * seconds;
-    }
-}
-
 static void copy(interp_view *v, const world_snapshot *s)
 {
     v->count = s->count;
     memcpy(v->bodies, s->bodies, sizeof s->bodies[0] * (size_t)s->count);
 }
 
+/* ---- guessing ---- */
+
+static double guess_limit_ms(const interp *ip) { return ip->guess == GUESS_FREEZE ? 0 : INTERP_GUESS_MS; }
+
+void interp_board_at(sim_arena *out, const sim_arena *board, uint32_t tick)
+{
+    for (int layer = 0; layer < SIM_LAYERS; layer++)
+        for (int i = 0; i < SIM_TILES; i++) {
+            out->tiles[layer][i].state = (uint8_t)interp_tile_state(&board->tiles[layer][i], tick);
+            out->tiles[layer][i].touch_tick = board->tiles[layer][i].touch_tick;
+        }
+}
+
+/* Where the players of snapshot a would be `ahead_ms` later, if each did
+ * what the guess says: whole ticks of the game's physics, then part of one. */
+static void guess(interp_view *v, const interp *ip, const world_snapshot *a, double ahead_ms)
+{
+    copy(v, a);
+    if (ip->guess == GUESS_FREEZE || !ip->board || ahead_ms <= 0)
+        return;
+    double ticks = ahead_ms / TICK_MS;
+    int steps = (int)ceil(ticks);
+    float t = (float)(ticks - (steps - 1));
+    static sim_arena board;  /* main thread only */
+    sim_body now[HF_MAX_PLAYERS], before[HF_MAX_PLAYERS];
+    for (int i = 0; i < a->count; i++)
+        now[i] = world_body_to_sim(&a->bodies[i]);
+    for (int k = 1; k <= steps; k++) {
+        interp_board_at(&board, ip->board, a->tick + (uint32_t)k - 1);  /* the server lets tiles fall after moving */
+        for (int i = 0; i < a->count; i++) {
+            before[i] = now[i];
+            sim_input in = {0};
+            if (ip->guess == GUESS_KEEP)
+                in = (sim_input){.mx = now[i].vx / SIM_MAX_SPEED, .mz = now[i].vz / SIM_MAX_SPEED};
+            sim_body_step(&now[i], &in, &board, a->tick + (uint32_t)k, NULL, NULL);
+        }
+    }
+    for (int i = 0; i < a->count; i++) {
+        world_body *o = &v->bodies[i];
+        if (!o->alive)
+            continue;
+        o->x = lerpf(before[i].x, now[i].x, t);
+        o->y = lerpf(before[i].y, now[i].y, t);
+        o->z = lerpf(before[i].z, now[i].z, t);
+        o->vx = now[i].vx;
+        o->vy = now[i].vy;
+        o->vz = now[i].vz;
+        o->facing = lerp_angle(before[i].facing, now[i].facing, t);
+        o->grounded = now[i].grounded;
+        o->layer = now[i].layer;
+        /* alive stays as the snapshot says: only the server knocks anyone out */
+    }
+}
+
+/* Snapshot s came after the screen had to do without it: what would the
+ * guess have shown for its moment, and how far off was that? */
+static void score_guess(interp *ip, const world_snapshot *s)
+{
+    const interp_slot *from = NULL;
+    for (uint32_t k = 1; k < INTERP_HISTORY && !from; k++)
+        from = slot_of(ip, s->tick - k);
+    if (!from)
+        return;
+    double ahead = (double)(s->tick - from->s.tick) * TICK_MS;
+    static interp_view g;  /* main thread only */
+    guess(&g, ip, &from->s, fmin(ahead, guess_limit_ms(ip)));
+    for (int i = 0; i < g.count; i++) {
+        const world_body *gb = &g.bodies[i], *real = find(s, i, gb->id);
+        if (!real || !gb->alive || !real->alive)
+            continue;
+        float dx = real->x - gb->x, dy = real->y - gb->y, dz = real->z - gb->z;
+        double d = sqrt((double)(dx * dx + dy * dy + dz * dz));
+        if (d > INTERP_TELEPORT * (double)(s->tick - from->s.tick))
+            continue;  /* a jump in position: no guess could have known */
+        ip->guess_error_sum += d;
+        ip->guess_error_max = fmax(ip->guess_error_max, d);
+        ip->guess_errors++;
+    }
+}
+
 /* Fills the view for the playout time; returns the moment shown, in ms since
- * `base` (behind the playout when extrapolation had to stop). */
-static double sample(interp *ip)
+ * `base` (behind the playout when the guess had to stop: then *waiting). */
+static double sample(interp *ip, int *waiting)
 {
     interp_view *v = &ip->view;
     double p = ip->playout_ms / TICK_MS;  /* ticks since base */
@@ -245,20 +338,23 @@ static double sample(interp *ip)
         b = slot_of(ip, ip->base + (uint32_t)t);
 
     double shown;
+    v->guessed = 0;
     if (a && b) {
         double ta = tick_ms(ip, a->s.tick), tb = tick_ms(ip, b->s.tick);
         blend(v, &a->s, &b->s, (float)((ip->playout_ms - ta) / (tb - ta)));
         shown = ip->playout_ms;
     } else if (a) {
-        double ta = tick_ms(ip, a->s.tick), ahead = ip->playout_ms - ta;
+        double ta = tick_ms(ip, a->s.tick), ahead = ip->playout_ms - ta, limit = guess_limit_ms(ip);
         if (ahead > 0.5) {
-            ip->frames_extrapolated++;
-            if (ahead > INTERP_EXTRAPOLATE_MS) {
-                ip->frames_stopped++;
-                ahead = INTERP_EXTRAPOLATE_MS;
+            ip->frames_guessed++;
+            v->guessed = 1;
+            if (ahead > limit) {
+                ip->frames_waiting++;
+                *waiting = 1;
+                ahead = limit;
             }
         }
-        extrapolate(v, &a->s, (float)(ahead / 1000.0));
+        guess(v, ip, &a->s, ahead);
         shown = ta + ahead;
     } else if (b) {
         copy(v, &b->s);  /* the playout is before anything we have: just after a start */
@@ -279,17 +375,21 @@ void interp_frame(interp *ip, uint64_t now_ms)
     if (!ip->have) {
         v->count = 0;
         v->tick = 0;
+        v->guessed = 0;
+        ip->waiting_ms = 0;
         return;
     }
     ip->frames++;
 
     double shown;
+    int waiting = 0;
     if (ip->mode == INTERP_NONE) {
         /* Step 1: the newest snapshot as it is. Tiles still animate between
          * ticks, as they did then; the beans do not. */
         const interp_slot *sl = slot_of(ip, ip->newest);
         if (sl)
             copy(v, &sl->s);
+        v->guessed = 0;
         double into = ((double)now_ms - (double)ip->newest_arrived_ms) / TICK_MS;
         v->tick = (double)ip->newest + (into < 0 ? 0 : into > 0.999 ? 0.999 : into);
         shown = tick_ms(ip, ip->newest);
@@ -297,8 +397,9 @@ void interp_frame(interp *ip, uint64_t now_ms)
         ip->delay_ms = 0;
     } else {
         steer(ip, now_ms, dt);
-        shown = sample(ip);
+        shown = sample(ip, &waiting);
     }
+    ip->waiting_ms = waiting ? ip->waiting_ms + dt : 0;
 
     /* On a smooth screen the moment shown moves exactly as fast as real time. */
     if (ip->shown_valid && dt > 0) {

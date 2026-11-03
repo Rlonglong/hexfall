@@ -11,7 +11,7 @@
  * the room, the board and the latest snapshot. No drawing and no sockets
  * here, so it can be tested on its own and every renderer reads the same
  * state. This is always the newest news; interp.c decides which moment of
- * it is drawn, and prediction (step 3) will add its own view on top. */
+ * it is drawn, and predict.c where our own player is drawn. */
 
 #define WORLD_FEED 5
 
@@ -84,6 +84,10 @@ int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out);
 /* Takes a snapshot as the newest news, unless a newer one came first (then
  * it is only counted as late; interp.c may still have a use for it). */
 void world_apply_snapshot(world *w, const world_snapshot *s, uint64_t arrived_ms);
+
+/* A body as the physics (sim.c) takes it. The jump cooldown is not in a
+ * snapshot, so it starts at 0. */
+sim_body world_body_to_sim(const world_body *b);
 
 const world_player *world_player_by_id(const world *w, uint16_t id);
 const world_body *world_body_by_id(const world *w, uint16_t id);
