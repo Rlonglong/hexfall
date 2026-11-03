@@ -16,8 +16,8 @@ Built as the final project for the Network Programming course at NYCU.
 - [x] Headless bot client, which doubles as a load generator
 - [x] Fault injection (packet loss, delay, jitter) for testing and demos
 - [x] Client network thread with NTP-style clock sync, stress-tested and checked with ThreadSanitizer
-- [x] Desktop client (raylib), steps 1 and 2: plays a full round; players are drawn between snapshots, with no, a fixed or an adaptive delay
-- [ ] Desktop client: prediction and reconciliation
+- [x] Desktop client (raylib), steps 1 to 3: plays a full round; other players are drawn between snapshots (no, a fixed or an adaptive delay), our own is predicted and reconciled with the server
+- [ ] Desktop client: network overlay
 - [ ] Browser client over a hand-written WebSocket server
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design; [docs/PROTOCOL.md](docs/PROTOCOL.md) specifies every message.
@@ -56,7 +56,7 @@ Simulate a bad network. Both programs accept these flags; give them to both to d
 ./build/hexfall-server --port 8080 --loss 10 --delay 40 --jitter 40
 ```
 
-Play with the desktop client (WASD or arrow keys to move, Space to jump, drag with the mouse or Q/E to turn the camera, Enter to get ready, C to switch camera, F1 for the network panel, I to switch smoothing, N to simulate a bad network):
+Play with the desktop client (WASD or arrow keys to move, Space to jump, click into the window and move the mouse to turn the camera, Esc to let the mouse go, Q/E also turn, Enter to get ready, C to switch camera, F1 for the network panel; to compare techniques: I smoothing, G guessing, P prediction, N to simulate a bad network):
 
 ```bash
 ./build/hexfall-client --port 8080 --name alice

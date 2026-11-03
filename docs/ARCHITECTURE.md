@@ -71,11 +71,11 @@ LOBBY ──enough players, all ready──> COUNTDOWN ──3 s──> PLAYING 
 
 Each player is connected, disconnected but within the grace period, or removed. During a round a player is either still on the board or eliminated with a finishing place.
 
-## Inputs (ready for prediction and reconciliation)
+## Inputs and prediction
 
 - A client sends one INPUT per tick. Every input sample has a sequence number, and each INPUT repeats the newest four samples, so losing a packet loses no input.
-- The server queues samples and consumes exactly one per tick. When a burst arrives after a stall, it skips the oldest samples but keeps any jump.
-- Every snapshot tells the client which input sequence number its player was last simulated with (`ack_input`). A predicting client replays its inputs from that point.
+- The server queues samples and consumes exactly one per tick (`common/input_queue.c`). When none is waiting, the stick stays where it was but a jump is not repeated. When a burst arrives after a stall, it skips the oldest samples but keeps any jump.
+- Every snapshot tells the client which input sequence number its player was last simulated with (`ack_input`). The desktop client predicts its own player with the same queue rules and physics, and replays its inputs from that point when a snapshot arrives (see [CLIENT.md](CLIENT.md)).
 
 ## Tiles
 
@@ -91,6 +91,7 @@ Each player is connected, disconnected but within the grace period, or removed. 
 | `common/protocol.[ch]` | Message definitions, encoders, decoders |
 | `common/reliable.[ch]` | The UDP reliability layer |
 | `common/sim.[ch]` | Arena and physics, shared by server and clients |
+| `common/input_queue.[ch]` | One player's inputs on the server, one per tick; shared so clients predict by the same rules |
 | `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
 | `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
 | `server/room.c` | The game: lobby, rounds, eliminations |
@@ -111,7 +112,7 @@ Each player is connected, disconnected but within the grace period, or removed. 
 
 - [x] Client network thread, channels and clock synchronisation (see [CLIENT.md](CLIENT.md))
 - [x] Desktop client (raylib) on top of the network thread, drawing snapshots as they arrive
-- [ ] Client-side prediction of the local player, reconciled with `ack_input`
+- [x] Client-side prediction of the local player, reconciled with `ack_input` (see [CLIENT.md](CLIENT.md))
 - [x] Interpolation of remote players: none, fixed delay, adaptive delay (see [CLIENT.md](CLIENT.md))
 - [ ] Lag compensation for jumps
 - [ ] Reconnect testing with bots (HELLO with a resume token)
