@@ -5,7 +5,7 @@ CFLAGS  ?= -std=gnu11 -O2 -g -Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissin
 CPPFLAGS += -Icommon -Iclient
 LDLIBS  += -lm -lpthread
 
-COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c
+COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c common/input_queue.c
 NETCLI  := client/net_client.c
 NETTHR  := client/net_thread.c client/msg_queue.c client/clock_sync.c $(NETCLI)
 WORLD   := client/world.c client/interp.c

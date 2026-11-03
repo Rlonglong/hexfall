@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "input_queue.h"
 #include "server.h"
 #include "sim.h"
 #include "util.h"
@@ -17,8 +18,6 @@
 #define TICK_HZ SIM_TICK_HZ
 #define COUNTDOWN_TICKS (3 * TICK_HZ)
 #define RESULT_TICKS (5 * TICK_HZ)
-#define INPUT_QUEUE 16
-#define INPUT_TARGET 2  /* inputs allowed to wait; a longer queue only adds latency */
 #define COLORS 16
 
 typedef struct {
@@ -31,12 +30,7 @@ typedef struct {
     uint64_t lost_ms;
     int ready, playing, place;
     sim_body body;
-    input_sample queue[INPUT_QUEUE];  /* oldest first, one is used per tick */
-    int queue_len;
-    int have_seq;
-    uint16_t newest_seq;              /* newest input received */
-    uint16_t applied_seq;             /* input simulated last tick; echoed in snapshots */
-    input_sample current;
+    inputq in;        /* one input per tick; in.applied is echoed in snapshots */
 } player;
 
 static struct {
@@ -231,22 +225,6 @@ static void on_hello(conn *c, rbuf *payload, uint64_t now_ms)
            p->name, kind_name(p->kind));
 }
 
-static void queue_inputs(player *p, const msg_input *m)
-{
-    for (int i = m->count - 1; i >= 0; i--) {  /* oldest first */
-        const input_sample *s = &m->s[i];
-        if (p->have_seq && (int16_t)(uint16_t)(s->seq - p->newest_seq) <= 0)
-            continue;  /* a repeat for redundancy, or out of date */
-        if (p->queue_len == INPUT_QUEUE) {
-            memmove(p->queue, p->queue + 1, sizeof p->queue[0] * (INPUT_QUEUE - 1));
-            p->queue_len--;
-        }
-        p->queue[p->queue_len++] = *s;
-        p->newest_seq = s->seq;
-        p->have_seq = 1;
-    }
-}
-
 static void on_bye(conn *c, player *p, uint64_t now_ms)
 {
     hf_log("#%u \"%s\" left", p->id, p->name);
@@ -279,7 +257,7 @@ void room_on_message(conn *c, uint8_t type, rbuf *payload, uint64_t now_ms)
     case MSG_INPUT: {
         msg_input m;
         if (hf_get_input(payload, &m))
-            queue_inputs(p, &m);
+            inputq_add(&p->in, &m);
         break;
     }
     case MSG_PING: {
@@ -313,8 +291,7 @@ void room_on_conn_lost(conn *c, uint64_t now_ms)
     p->c = NULL;
     p->lost_ms = now_ms;
     p->ready = 0;
-    p->queue_len = 0;
-    p->current = (input_sample){0};  /* stand still until the player is back */
+    inputq_clear(&p->in);  /* stand still until the player is back */
     R.room_dirty = 1;
     hf_log("#%u \"%s\" lost connection; keeping the slot for %d s", p->id, p->name,
            RECONNECT_GRACE_MS / 1000);
@@ -352,44 +329,13 @@ static void start_round(void)
         float x, z;
         sim_spawn_point(k++, n, &x, &z);
         sim_body_spawn(&p->body, x, z);
-        p->queue_len = 0;
-        p->current = (input_sample){0};
+        inputq_clear(&p->in);
     }
     R.round_players = n;
     R.alive = n;
     R.tiles_dirty = 1;
     set_phase(PHASE_PLAYING, 0);
     hf_log("round started with %d players", n);
-}
-
-/* One input per tick, in order. If inputs piled up (a burst after a stall),
- * skip ahead, keeping any jump press. If none arrived, keep the stick where
- * it was but do not repeat a jump. */
-static sim_input next_input(player *p)
-{
-    if (p->queue_len > INPUT_TARGET + 2) {
-        int drop = p->queue_len - INPUT_TARGET;
-        uint8_t jump = 0;
-        for (int i = 0; i < drop; i++)
-            jump |= p->queue[i].buttons & BTN_JUMP;
-        memmove(p->queue, p->queue + drop, sizeof p->queue[0] * (size_t)(p->queue_len - drop));
-        p->queue_len -= drop;
-        p->queue[0].buttons |= jump;
-    }
-    if (p->queue_len > 0) {
-        p->current = p->queue[0];
-        memmove(p->queue, p->queue + 1, sizeof p->queue[0] * (size_t)(p->queue_len - 1));
-        p->queue_len--;
-        p->applied_seq = p->current.seq;
-    } else {
-        p->current.buttons = 0;
-    }
-    sim_input in = {
-        .mx = p->current.mx / 127.0f,
-        .mz = p->current.mz / 127.0f,
-        .jump = (p->current.buttons & BTN_JUMP) != 0,
-    };
-    return in;
 }
 
 static void on_touch(void *ctx, int layer, int q, int r)
@@ -426,7 +372,7 @@ static void play_tick(void)
         player *p = &R.p[i];
         if (!p->used || !p->playing || !p->body.alive)
             continue;
-        sim_input in = next_input(p);
+        sim_input in = inputq_next(&p->in);
         sim_body_step(&p->body, &in, &R.arena, R.tick, on_touch, NULL);
         if (p->body.alive)
             bodies[n++] = &p->body;
@@ -540,8 +486,8 @@ static void send_updates(void)
         player *p = &R.p[i];
         if (!p->used || !p->c)
             continue;
-        buf[7] = (uint8_t)(p->applied_seq >> 8);
-        buf[8] = (uint8_t)p->applied_seq;
+        buf[7] = (uint8_t)(p->in.applied >> 8);
+        buf[8] = (uint8_t)p->in.applied;
         conn_send(p->c, buf, w.len);
     }
 }
