@@ -13,8 +13,9 @@
 /* The look follows the browser prototype: pastel hex floors lit by a
  * sky/ground hemisphere and a warm sun, sky-coloured fog, white pillars
  * around a purple slime, and a dark broadcast-style HUD where amber always
- * means "you". Everything this file keeps is for looks only; where a bean
- * stands comes from the latest snapshot as is. */
+ * means "you". Everything this file keeps is for looks only. Where a bean
+ * stands, and the moment the whole scene shows (tiles included), come from
+ * the interpolation's view; see interp.h. */
 
 #define SKY ((Color){168, 214, 232, 255})
 #define SLIME ((Color){176, 106, 224, 255})
@@ -128,10 +129,14 @@ typedef struct {
 } particle;
 
 #define PARTICLES 512
+#define TAG_OTHERS 4      /* name tags besides our own */
+#define TAG_RADIUS 14.0f  /* how near another bean must be for its tag */
 
 static Camera3D cam;
-static int cam_ready, last_focus;
+static int cam_ready, last_focus, swinging;
 static float focus_y, layer_alpha[SIM_LAYERS] = {1, 1, 1};
+static float cam_yaw, cam_back, cam_up, cam_ahead, cam_look;
+static Vector3 cam_centre;
 static uint64_t last_frame_ms, start_ms, phase_seen_ms, count_seen_ms;
 static int last_phase = -1, phase_before = -1, last_count;
 static bean_look looks[HF_MAX_PLAYERS * 2];
@@ -360,11 +365,11 @@ static int floor_below(float y)
 }
 
 /* The floor to watch from above: the one most players stand on. */
-static int busiest_layer(const world *w)
+static int busiest_layer(const interp_view *v)
 {
     int count[SIM_LAYERS] = {0}, best = 0;
-    for (int i = 0; i < w->body_count; i++) {
-        const world_body *b = &w->bodies[i];
+    for (int i = 0; i < v->count; i++) {
+        const world_body *b = &v->bodies[i];
         if (b->alive && b->grounded && b->layer >= 0 && b->layer < SIM_LAYERS)
             count[b->layer]++;
     }
@@ -374,14 +379,14 @@ static int busiest_layer(const world *w)
     return count[best] ? best : last_focus;
 }
 
-static void update_camera(const world *w, const render_options *opt, float dt, float t)
+static void update_camera(const world *w, const interp_view *v, const render_options *opt, float dt, float t)
 {
-    const world_body *me = world_body_by_id(w, w->me);
+    const world_body *me = interp_body(v, w->me);
     int round_on = w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT;
     int chase = !opt->overview && round_on && me && me->alive;
     int focus = w->phase == PHASE_LOBBY || w->phase == PHASE_COUNTDOWN ? 0
                 : chase ? floor_below(me->y)
-                        : busiest_layer(w);
+                        : busiest_layer(v);
     last_focus = focus;
 
     float k = cam_ready ? 1.0f - expf(-dt * 2.2f) : 1.0f;
@@ -391,44 +396,62 @@ static void update_camera(const world *w, const render_options *opt, float dt, f
         layer_alpha[layer] += (want - layer_alpha[layer]) * (cam_ready ? fminf(1, dt * 4) : 1.0f);
     }
 
-    Vector3 pos, look;
+    /* What the camera circles around, how far back and up it sits, and how
+     * far past the centre it looks. */
+    Vector3 centre = {0, focus_y, 0};
+    float back = 40, up = 52, ahead = 4, look = -1, want_yaw = opt->yaw;
     if (chase) {
-        /* Behind and above, always facing -z, so W is always "away from the
-         * camera". Low enough to stay under the floor above. */
-        pos = (Vector3){me->x, me->y + 10.5f, me->z + 17};
-        look = (Vector3){me->x, me->y + 0.5f, me->z - 3};
+        centre = (Vector3){me->x, me->y, me->z};
+        back = 17, up = 10.5f, ahead = 3, look = 0.5f;  /* low enough to stay under the floor above */
     } else if (w->phase == PHASE_LOBBY) {
-        float a = t * 0.08f;  /* a slow orbit while people get ready */
-        pos = (Vector3){sinf(a) * 40, focus_y + 46, cosf(a) * 40};  /* inside the ring of pillars */
-        look = (Vector3){0, focus_y - 8, 0};
-    } else {
-        pos = (Vector3){0, focus_y + 52, 40};  /* inside the ring of pillars */
-        look = (Vector3){0, focus_y - 1, 4};
+        back = 40, up = 46, ahead = 0, look = -8;  /* inside the ring of pillars */
+        want_yaw = t * 0.08f;                      /* a slow orbit while people get ready */
     }
+
+    /* The angle is the player's (mouse or Q/E), and the keys are read
+     * relative to it, so it is used as is: what W means on screen and what
+     * is sent always agree. Only a big change (leaving the lobby's orbit)
+     * swings round smoothly. */
     float r = cam_ready ? 1.0f - expf(-dt * 3) : 1.0f;
+    float turn = atan2f(sinf(want_yaw - cam_yaw), cosf(want_yaw - cam_yaw));
+    if (fabsf(turn) > 0.35f)
+        swinging = 1;
+    else if (fabsf(turn) < 0.01f)
+        swinging = 0;
+    cam_yaw += swinging && cam_ready ? turn * r : turn;
+
+    cam_centre = cam_ready ? Vector3Lerp(cam_centre, centre, r) : centre;
+    cam_back += (back - cam_back) * r;
+    cam_up += (up - cam_up) * r;
+    cam_ahead += (ahead - cam_ahead) * r;
+    cam_look += (look - cam_look) * r;
+    float sy = sinf(cam_yaw), cy = cosf(cam_yaw);
+    cam.position = (Vector3){cam_centre.x + sy * cam_back, cam_centre.y + cam_up, cam_centre.z + cy * cam_back};
+    cam.target = (Vector3){cam_centre.x - sy * cam_ahead, cam_centre.y + cam_look, cam_centre.z - cy * cam_ahead};
     cam.fovy += ((chase ? 52.0f : 45.0f) - cam.fovy) * r;
-    cam.position = Vector3Lerp(cam.position, pos, r);
-    cam.target = Vector3Lerp(cam.target, look, r);
     cam_ready = 1;
 }
 
-static void draw_tile(const world *w, int layer, int index, float alpha, float frac)
+/* Tiles are drawn as they were at the moment the view shows. */
+static void draw_tile(const world *w, const interp_view *v, int layer, int index, float alpha)
 {
     const sim_tile *t = &w->arena.tiles[layer][index];
+    int state = interp_tile_state(t, v->tick);
+    float since = (float)(v->tick - (double)t->touch_tick);  /* ticks since it was touched */
     int q, r;
     float x, z, y = SIM_LAYER_Y[layer] - 0.4f;
     sim_tile_qr(index, &q, &r);
     sim_tile_center(q, r, &x, &z);
     Color c = LAYER_COLORS[layer];
     Matrix spin = MatrixIdentity();
-    if (t->state == TILE_TOUCHED) {
+    if (state == TILE_TOUCHED) {
         /* White at once, shaking harder as its moment comes. */
-        float k = clampf(((float)(int32_t)(w->tick - t->touch_tick) + frac) / SIM_FALL_TICKS, 0, 1);
+        float k = clampf(since / SIM_FALL_TICKS, 0, 1);
         c = TOUCHED;
         x += (rnd() - 0.5f) * 0.18f * k;
         z += (rnd() - 0.5f) * 0.18f * k;
-    } else if (t->state == TILE_GONE) {
-        float s = ((float)(int32_t)(w->tick - (t->touch_tick + SIM_FALL_TICKS)) + frac) / SIM_TICK_HZ;
+    } else if (state == TILE_GONE) {
+        float s = (since - SIM_FALL_TICKS) / SIM_TICK_HZ;
         if (t->touch_tick == 0 || s < 0 || s > 0.8f)
             return;  /* long gone, or gone before we joined */
         y -= 15.0f * s * s;
@@ -437,25 +460,26 @@ static void draw_tile(const world *w, int layer, int index, float alpha, float f
     draw_mesh(hex, ColorAlpha(c, alpha), MatrixMultiply(spin, MatrixTranslate(x, y, z)));
 }
 
-static void draw_floors(const world *w, float frac, int see_through)
+static void draw_floors(const world *w, const interp_view *v, int see_through)
 {
     for (int layer = 0; layer < SIM_LAYERS; layer++) {
         float a = layer_alpha[layer];
         if ((a < 0.99f) != see_through || a < 0.02f)
             continue;
         for (int i = 0; i < SIM_TILES; i++)
-            draw_tile(w, layer, i, see_through ? a : 1.0f, frac);
+            draw_tile(w, v, layer, i, see_through ? a : 1.0f);
     }
 }
 
 /* Crumbs when a tile goes, the first time we see it go. */
-static void watch_tiles(const world *w)
+static void watch_tiles(const world *w, const interp_view *v)
 {
     for (int layer = 0; layer < SIM_LAYERS; layer++)
         for (int i = 0; i < SIM_TILES; i++) {
             const sim_tile *t = &w->arena.tiles[layer][i];
-            if (t->state == TILE_GONE && seen_state[layer][i] != TILE_GONE && t->touch_tick != 0 &&
-                (int32_t)(w->tick - (t->touch_tick + SIM_FALL_TICKS)) < 3 && rnd() < 0.5f) {
+            int state = interp_tile_state(t, v->tick);
+            if (state == TILE_GONE && seen_state[layer][i] != TILE_GONE && t->touch_tick != 0 &&
+                v->tick - (double)(t->touch_tick + SIM_FALL_TICKS) < 3 && rnd() < 0.5f) {
                 int q, r;
                 float x, z;
                 sim_tile_qr(i, &q, &r);
@@ -463,16 +487,19 @@ static void watch_tiles(const world *w)
                 Color colors[2] = {LAYER_COLORS[layer], WHITE};
                 burst(x, SIM_LAYER_Y[layer], z, colors, 2, 4, 2);
             }
-            seen_state[layer][i] = t->state;
+            seen_state[layer][i] = (uint8_t)state;
         }
 }
 
-static void draw_shadow(const world *w, const world_body *b)
+static void draw_shadow(const world *w, const interp_view *v, const world_body *b)
 {
+    int q, r;
+    if (!sim_world_tile(b->x, b->z, &q, &r))
+        return;
     for (int layer = 0; layer < SIM_LAYERS; layer++) {
         float h = SIM_LAYER_Y[layer];
-        int state = sim_tile_state_at(&w->arena, layer, b->x, b->z);
-        if (h > b->y + 0.01f || state < 0 || state == TILE_GONE)
+        int state = interp_tile_state(&w->arena.tiles[layer][sim_tile_index(q, r)], v->tick);
+        if (h > b->y + 0.01f || state == TILE_GONE)
             continue;
         float s = 0.95f * clampf(1.0f - (b->y - h) / 8.0f, 0.4f, 1.0f);
         draw_mesh(disc, ColorAlpha(BLACK, 0.25f), at(b->x, h + 0.03f, b->z, s, 1, s));
@@ -538,22 +565,22 @@ static void draw_particles(void)
                           faded(parts[i].color, parts[i].life * 2));
 }
 
-static void draw_world(const world *w, float frac, float t)
+static void draw_world(const world *w, const interp_view *v, float t)
 {
-    float view[3] = {cam.position.x, cam.position.y, cam.position.z};
-    SetShaderValue(lit, loc_view, view, SHADER_UNIFORM_VEC3);
+    float eye[3] = {cam.position.x, cam.position.y, cam.position.z};
+    SetShaderValue(lit, loc_view, eye, SHADER_UNIFORM_VEC3);
     draw_arena();
     if (w->have_board)
-        draw_floors(w, frac, 0);
+        draw_floors(w, v, 0);
 
     if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT) {
         rlDisableDepthMask();
-        for (int i = 0; i < w->body_count; i++)
-            if (w->bodies[i].alive)
-                draw_shadow(w, &w->bodies[i]);
+        for (int i = 0; i < v->count; i++)
+            if (v->bodies[i].alive)
+                draw_shadow(w, v, &v->bodies[i]);
         rlEnableDepthMask();
-        for (int i = 0; i < w->body_count; i++) {
-            const world_body *b = &w->bodies[i];
+        for (int i = 0; i < v->count; i++) {
+            const world_body *b = &v->bodies[i];
             if (!b->alive)
                 continue;
             draw_bean(b, look_for(b->id, b->facing), player_color(w, b->id), t);
@@ -565,21 +592,22 @@ static void draw_world(const world *w, float frac, float t)
 
     rlDisableDepthMask();  /* see-through floors and sparks do not hide what is behind them */
     if (w->have_board)
-        draw_floors(w, frac, 1);
+        draw_floors(w, v, 1);
     draw_particles();
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
 }
 
 /* Beans turn smoothly, and a bean that just went into the slime splashes. */
-static void watch_beans(const world *w, float dt)
+static void watch_beans(const world *w, const interp_view *v, float dt)
 {
-    for (int i = 0; i < w->body_count; i++) {
-        const world_body *b = &w->bodies[i];
+    for (int i = 0; i < v->count; i++) {
+        const world_body *b = &v->bodies[i];
         bean_look *lk = look_for(b->id, b->facing);
         float diff = atan2f(sinf(b->facing - lk->face), cosf(b->facing - lk->face));
         lk->face += diff * fminf(1, dt * 12);
-        if (lk->was_alive && !b->alive && w->phase == PHASE_PLAYING) {
+        /* RESULT too: the last one to fall is shown a moment after the server ends the round. */
+        if (lk->was_alive && !b->alive && (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)) {
             Color colors[3] = {{217, 166, 255, 255}, SLIME, WHITE};
             burst(b->x, SIM_SLIME_Y + 0.5f, b->z, colors, 3, 22, 6);
         }
@@ -661,34 +689,64 @@ static int in_front(Vector3 p)
     return Vector3DotProduct(f, d) > 0;
 }
 
-static void draw_tags(const world *w)
+static void draw_tag(const world *w, const world_body *b)
 {
-    for (int pass = 0; pass < 2; pass++)  /* our own tag last, on top */
-        for (int i = 0; i < w->body_count; i++) {
-            const world_body *b = &w->bodies[i];
-            const world_player *p = world_player_by_id(w, b->id);
-            int mine = b->id == w->me;
-            Vector3 head = {b->x, b->y + 3.9f, b->z};
-            if (!b->alive || !p || mine != pass || !in_front(head))
-                continue;
-            Vector2 s = GetWorldToScreen(head, cam);
-            float size = mine ? 18 : 14, tw = text_width(p->name, size), bw = tw + (mine ? 22 : 14), bh = size + 10;
-            if (mine) {
-                box(s.x - bw / 2, s.y - bh - 8, bw, bh, 6, AMBER);
-                triangle((Vector2){s.x - 8, s.y - 9}, (Vector2){s.x, s.y}, (Vector2){s.x + 8, s.y - 9}, AMBER);
-                text(p->name, s.x - tw / 2, s.y - bh - 8 + 5, size, AMBER_INK);
-            } else {
-                box(s.x - bw / 2, s.y - bh, bw, bh, 4, ColorAlpha(BOOTH, 0.6f));
-                text(p->name, s.x - tw / 2, s.y - bh + 5, size, FG);
-            }
-        }
+    const world_player *p = world_player_by_id(w, b->id);
+    Vector3 head = {b->x, b->y + 3.9f, b->z};
+    if (!p || !in_front(head))
+        return;
+    int mine = b->id == w->me;
+    Vector2 s = GetWorldToScreen(head, cam);
+    float size = mine ? 18 : 14, tw = text_width(p->name, size), bw = tw + (mine ? 22 : 14), bh = size + 10;
+    if (mine) {
+        box(s.x - bw / 2, s.y - bh - 8, bw, bh, 6, AMBER);
+        triangle((Vector2){s.x - 8, s.y - 9}, (Vector2){s.x, s.y}, (Vector2){s.x + 8, s.y - 9}, AMBER);
+        text(p->name, s.x - tw / 2, s.y - bh - 8 + 5, size, AMBER_INK);
+    } else {
+        box(s.x - bw / 2, s.y - bh, bw, bh, 4, ColorAlpha(BOOTH, 0.6f));
+        text(p->name, s.x - tw / 2, s.y - bh + 5, size, FG);
+    }
 }
 
-static void draw_alive(const world *w)
+/* Our own tag always. Of the others only the few nearest to us (or, while
+ * we watch, to where the camera looks), so that a full room stays
+ * readable, plus the winner's once the round is over. */
+static void draw_tags(const world *w, const interp_view *v)
+{
+    const world_body *me = interp_body(v, w->me);
+    int alive_me = me && me->alive;
+    Vector3 from = alive_me ? (Vector3){me->x, me->y, me->z} : cam.target;
+    int pick[HF_MAX_PLAYERS], n = 0;
+    float dist[HF_MAX_PLAYERS];
+    for (int i = 0; i < v->count; i++) {
+        const world_body *b = &v->bodies[i];
+        const world_player *p = world_player_by_id(w, b->id);
+        if (!b->alive || !p || b->id == w->me)
+            continue;
+        float dx = b->x - from.x, dz = b->z - from.z, d = sqrtf(dx * dx + dz * dz);
+        if (w->phase == PHASE_RESULT && p->place == 1)
+            d = -1;  /* first in line */
+        else if (d > TAG_RADIUS || fabsf(b->y - from.y) > 6)
+            continue;
+        int k = n++;
+        for (; k > 0 && dist[k - 1] > d; k--) {
+            pick[k] = pick[k - 1];
+            dist[k] = dist[k - 1];
+        }
+        pick[k] = i;
+        dist[k] = d;
+    }
+    for (int k = 0; k < n && k < TAG_OTHERS; k++)
+        draw_tag(w, &v->bodies[pick[k]]);
+    if (alive_me)
+        draw_tag(w, me);  /* last, on top */
+}
+
+static void draw_alive(const interp_view *v)
 {
     char count[16], of[24];
-    snprintf(count, sizeof count, "%d", world_alive_count(w));
-    snprintf(of, sizeof of, "of %d", w->body_count);
+    snprintf(count, sizeof count, "%d", interp_alive_count(v));
+    snprintf(of, sizeof of, "of %d", v->count);
     float x = 16, y = 16, bw = 104;
     box(x, y, bw, 96, 4, BOOTH);
     label("ALIVE", x + (bw - label_width("ALIVE", 14)) / 2, y + 10, 14, AMBER);
@@ -697,14 +755,14 @@ static void draw_alive(const world *w)
     text(of, x + (bw - text_width(of, 14)) / 2, y + 74, 14, MUTED);
 }
 
-static void draw_feed(const world *w, uint64_t now_ms)
+static void draw_feed(const world *w, const interp_view *v, uint64_t now_ms)
 {
     float right = (float)GetScreenWidth() - 16, y = 16;
     for (int i = w->note_count - 1; i >= 0; i--) {  /* newest on top */
         const world_note *n = &w->notes[i];
         float age = (float)(now_ms - n->at_ms) / 1000.0f, a = clampf((5.0f - age) / 0.5f, 0, 1);
-        if (age > 5.0f)
-            continue;
+        if (age > 5.0f || (n->knockout && v->tick < (double)n->tick))
+            continue;  /* faded, or the bean has not reached the slime on screen yet */
         float size = 15, h = 26;
         if (n->knockout) {
             const world_player *p = world_player_by_id(w, n->player);
@@ -798,10 +856,13 @@ static void pill(const char *s, float y, Color bg, Color fg)
     text(s, ((float)GetScreenWidth() - tw) / 2, y + 7, size, fg);
 }
 
-static void draw_hud(const world *w, const net_status *st, const render_options *opt, uint64_t now_ms)
+static void draw_hud(const world *w, const interp_view *v, const net_status *st, const render_options *opt,
+                     uint64_t now_ms)
 {
     float sw = (float)GetScreenWidth(), sh = (float)GetScreenHeight();
-    const world_body *me = world_body_by_id(w, w->me);
+    /* Whether we play this round is the newest news; whether we are out is
+     * what the screen shows. */
+    const world_body *in_round = world_body_by_id(w, w->me), *me = interp_body(v, w->me);
 
     switch (w->phase) {
     case PHASE_LOBBY:
@@ -821,22 +882,22 @@ static void draw_hud(const world *w, const net_status *st, const render_options 
         break;
     }
     case PHASE_PLAYING: {
-        draw_alive(w);
+        draw_alive(v);
         float since = (float)(now_ms - phase_seen_ms) / 1000.0f;
         if (phase_before == PHASE_COUNTDOWN && since < 0.8f)
             big("GO!", sw / 2, sh * 0.32f, 150 * (1 + 0.3f * clampf(1 - since * 4, 0, 1)), AMBER, AMBER_INK);
-        if (!me)
+        if (!in_round)
             pill("Watching - you join the next round", sh - 110, BOOTH, FG);
-        else if (!me->alive)
+        else if (me && !me->alive)
             pill("You are out - watching the rest", sh - 110, SIGNAL, WHITE);
         break;
     }
     case PHASE_RESULT:
-        draw_alive(w);
+        draw_alive(v);
         draw_result(w, now_ms);
         break;
     }
-    draw_feed(w, now_ms);
+    draw_feed(w, v, now_ms);
 
     if (st->state != NET_CONNECTED || !w->welcomed) {
         const char *what = st->state == NET_RESYNCING      ? "Catching up with the server..."
@@ -845,40 +906,59 @@ static void draw_hud(const world *w, const net_status *st, const render_options 
         pill(what, 20, SIGNAL, WHITE);
     }
 
-    const char *keys = "WASD move   SPACE jump   C camera   ENTER ready   F1 network";
+    const char *keys = "WASD move   SPACE jump   drag or Q/E turn   C camera   ENTER ready   F1 network";
     float kw = text_width(keys, 13);
     box(sw - kw - 34, sh - 40, kw + 18, 26, 4, BOOTH);
     text(keys, sw - kw - 25, sh - 34, 13, FG);
 }
 
-static void draw_network_panel(const world *w, const net_status *st, uint64_t now_ms)
+static void draw_network_panel(const world *w, const interp *ip, const net_status *st)
 {
-    char lines[6][96];
-    snprintf(lines[0], sizeof lines[0], "Connection  %s   sessions %llu   resyncs %llu", net_state_name(st->state),
-             (unsigned long long)st->sessions, (unsigned long long)st->resyncs);
+    char lines[7][128];
+    double frames = ip->frames ? (double)ip->frames : 1;
+    snprintf(lines[0], sizeof lines[0], "Connection  %s   sessions %llu   resyncs %llu   clock %s",
+             net_state_name(st->state), (unsigned long long)st->sessions, (unsigned long long)st->resyncs,
+             st->clock_valid ? "synced" : "not synced");
     snprintf(lines[1], sizeof lines[1], "RTT  %.1f ms   floor %.1f ms   jitter %.1f ms", st->rtt_ms, st->rtt_min_ms,
              st->jitter_ms);
-    snprintf(lines[2], sizeof lines[2], "Clock  %s", st->clock_valid ? "synced" : "not yet synced");
-    snprintf(lines[3], sizeof lines[3], "Packets  in %llu   out %llu   resent %llu", (unsigned long long)st->packets_in,
+    snprintf(lines[2], sizeof lines[2], "Packets  in %llu   out %llu   resent %llu", (unsigned long long)st->packets_in,
              (unsigned long long)st->packets_out, (unsigned long long)st->resends);
-    snprintf(lines[4], sizeof lines[4], "Snapshot  tick %u   age %d ms   late %llu", w->tick,
-             w->have_snapshot ? (int)(now_ms - w->snapshot_at_ms) : -1, (unsigned long long)w->snapshots_late);
-    snprintf(lines[5], sizeof lines[5], "Drawing  latest snapshot as is (no smoothing)   %d fps", GetFPS());
-    int n = 6;
+    snprintf(lines[3], sizeof lines[3], "Snapshots  tick %u   lost %.1f%%   95%% within %.0f ms   too late %llu",
+             w->tick, 100 * ip->loss, ip->late_ms, (unsigned long long)ip->too_late);
+    if (ip->mode == INTERP_NONE)
+        snprintf(lines[4], sizeof lines[4], "Smoothing  none: the newest snapshot as it is");
+    else
+        snprintf(lines[4], sizeof lines[4], "Smoothing  %s   drawing %.0f ms in the past", interp_mode_name(ip->mode),
+                 ip->delay_ms);
+    snprintf(lines[5], sizeof lines[5], "Screen  stutter %.1f ms   extrapolated %.1f%%   stopped %.1f%%   %d fps",
+             ip->stutter_ms, 100 * (double)ip->frames_extrapolated / frames, 100 * (double)ip->frames_stopped / frames,
+             GetFPS());
+    const netsim_cfg *in = &st->inbound;
+    if (in->delay_ms == 0 && in->jitter_ms == 0 && in->loss <= 0)
+        snprintf(lines[6], sizeof lines[6], "Simulated bad network  off");
+    else
+        snprintf(lines[6], sizeof lines[6], "Simulated bad network  +%d..%d ms, %.0f%% lost", in->delay_ms,
+                 in->delay_ms + in->jitter_ms, 100 * in->loss);
+    int n = 7;
     float size = 14, row = 19, wide = 0;
     for (int i = 0; i < n; i++)
         wide = fmaxf(wide, text_width(lines[i], size));
+    const char *keys = "I smoothing    N bad network";
+    wide = fmaxf(wide, label_width("NETWORK", 13) + 24 + text_width(keys, 13));
     float h = 34 + (float)n * row, y = (float)GetScreenHeight() - h - 14;
     box(14, y, wide + 28, h, 4, BOOTH);
     label("NETWORK", 28, y + 10, 13, AMBER);
+    text(keys, 28 + wide - text_width(keys, 13), y + 9, 13, MUTED);
     for (int i = 0; i < n; i++)
         text(lines[i], 28, y + 28 + (float)i * row, size, FG);
 }
 
 /* ================================================================ frame */
 
-void render_frame(const world *w, const net_status *st, const render_options *opt, uint64_t now_ms)
+void render_frame(const world *w, const interp *ip, const net_status *st, const render_options *opt,
+                  uint64_t now_ms)
 {
+    const interp_view *v = &ip->view;
     float dt = last_frame_ms ? (float)(now_ms - last_frame_ms) / 1000.0f : 0.0f;
     float t = (float)(now_ms - start_ms) / 1000.0f;
     last_frame_ms = now_ms;
@@ -888,9 +968,6 @@ void render_frame(const world *w, const net_status *st, const render_options *op
         last_phase = w->phase;
         phase_seen_ms = now_ms;
     }
-
-    /* How far we are into the current tick, for tile animations only. */
-    float frac = w->have_snapshot ? clampf((float)(now_ms - w->snapshot_at_ms) * SIM_TICK_HZ / 1000.0f, 0, 1) : 0;
 
     for (int i = 0; i < w->player_count; i++)
         need_text(w->players[i].name);
@@ -902,21 +979,21 @@ void render_frame(const world *w, const net_status *st, const render_options *op
     }
 
     if (w->have_board)
-        watch_tiles(w);
-    watch_beans(w, dt);
+        watch_tiles(w, v);
+    watch_beans(w, v, dt);
     step_particles(dt);
-    update_camera(w, opt, dt, t);
+    update_camera(w, v, opt, dt, t);
 
     BeginDrawing();
     ClearBackground(SKY);
     BeginMode3D(cam);
-    draw_world(w, frac, t);
+    draw_world(w, v, t);
     EndMode3D();
 
     if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)
-        draw_tags(w);
-    draw_hud(w, st, opt, now_ms);
+        draw_tags(w, v);
+    draw_hud(w, v, st, opt, now_ms);
     if (opt->show_network)
-        draw_network_panel(w, st, now_ms);
+        draw_network_panel(w, ip, st);
     EndDrawing();
 }
