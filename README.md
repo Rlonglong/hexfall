@@ -16,14 +16,15 @@ Built as the final project for the Network Programming course at NYCU.
 - [x] Headless bot client, which doubles as a load generator
 - [x] Fault injection (packet loss, delay, jitter) for testing and demos
 - [x] Client network thread with NTP-style clock sync, stress-tested and checked with ThreadSanitizer
-- [ ] Desktop client (raylib) with client-side prediction and interpolation
+- [x] Desktop client (raylib), step 1: plays a full round, drawing the server's state as it arrives
+- [ ] Desktop client: interpolation, prediction and reconciliation
 - [ ] Browser client over a hand-written WebSocket server
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design; [docs/PROTOCOL.md](docs/PROTOCOL.md) specifies every message.
 
 ## Build and test
 
-Requirements: a C compiler (clang or gcc) and make. Node.js is needed only for the last test step.
+Requirements: a C compiler (clang or gcc) and make. The desktop client also needs [raylib](https://www.raylib.com/) 5.5 or newer, found with `pkg-config` (`brew install raylib` on macOS); without it the client is skipped and everything else still builds. Node.js is needed only for the last test step.
 
 ```bash
 make
@@ -53,6 +54,12 @@ Simulate a bad network. Both programs accept these flags; give them to both to d
 
 ```bash
 ./build/hexfall-server --port 8080 --loss 10 --delay 40 --jitter 40
+```
+
+Play with the desktop client (WASD or arrow keys to move, Space to jump, Enter to get ready, C to switch camera, F1 for the network panel):
+
+```bash
+./build/hexfall-client --port 8080 --name alice
 ```
 
 Connect from another machine with `--host <address or domain>`.

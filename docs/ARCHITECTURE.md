@@ -110,7 +110,7 @@ Each player is connected, disconnected but within the grace period, or removed. 
 ## Next steps
 
 - [x] Client network thread, channels and clock synchronisation (see [CLIENT.md](CLIENT.md))
-- [ ] Desktop client (raylib) on top of the network thread
+- [x] Desktop client (raylib) on top of the network thread, drawing snapshots as they arrive
 - [ ] Client-side prediction of the local player, reconciled with `ack_input`
 - [ ] Interpolation of remote players: none, fixed delay, adaptive delay
 - [ ] Lag compensation for jumps

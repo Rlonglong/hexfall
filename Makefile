@@ -13,7 +13,15 @@ SERVER  := server/main.c server/udp.c server/room.c
 HEADERS := $(wildcard common/*.h server/*.h client/*.h)
 TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/golden
 
-all: build/hexfall-server build/hexfall-bot build/hexfall-netprobe
+# The desktop client needs raylib (brew install raylib / apt install libraylib-dev);
+# everything else builds without it.
+ifeq ($(shell pkg-config --exists raylib 2>/dev/null && echo yes),yes)
+CLIENT  := build/hexfall-client
+RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
+RAYLIB_LIBS   := $(shell pkg-config --libs raylib)
+endif
+
+all: build/hexfall-server build/hexfall-bot build/hexfall-netprobe $(CLIENT)
 
 build:
 	mkdir -p build
@@ -26,6 +34,9 @@ build/hexfall-bot: client/bot.c $(NETCLI) $(COMMON) $(HEADERS) | build
 
 build/hexfall-netprobe: client/netprobe.c $(NETTHR) $(COMMON) $(HEADERS) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ client/netprobe.c $(NETTHR) $(COMMON) $(LDLIBS)
+
+build/hexfall-client: client/game.c client/render.c $(WORLD) $(NETTHR) $(COMMON) $(HEADERS) | build
+	$(CC) $(CPPFLAGS) $(RAYLIB_CFLAGS) $(CFLAGS) -o $@ client/game.c client/render.c $(WORLD) $(NETTHR) $(COMMON) $(RAYLIB_LIBS) $(LDLIBS)
 
 build/test_%: tests/test_%.c $(WORLD) $(NETTHR) $(COMMON) $(HEADERS) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(WORLD) $(NETTHR) $(COMMON) $(LDLIBS)
