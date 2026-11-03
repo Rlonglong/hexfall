@@ -100,15 +100,15 @@ Drawing any moment between ticks `k-1` and `k` needs snapshot `k`, so it must ar
 
 **The playout clock never jumps.** It runs with real time, and when the delay or the smallest transit changes it runs up to 10% faster or slower until it is where it should be (it only jumps when it is more than 250 ms off, as at the start).
 
-**When a snapshot is late, the screen guesses, then waits.** If the snapshot after the playout time has not arrived, the screen has to show something, and these frames are what a larger delay avoids. It guesses with the game's own physics (`sim_body_step`, the server's code), from the newest snapshot it has and on the board as it was then. What nobody can know is what each player pressed meanwhile, so the guess assumes one of three things, switched with G:
+**When a snapshot is late, the screen guesses, then waits.** If the snapshot after the playout time has not arrived, the screen has to show something, and these frames are what a larger delay avoids. It guesses with the game's own physics (`sim_body_step`, the server's code), from the newest snapshot it has and on the board as it was then. What nobody can know is what each player pressed meanwhile. In the air that does not matter: the stick does nothing there, so a jump goes where the bean was heading when it left the floor (turning the camera on the way changes nothing either), and it lands, or falls through a hole, as the board says. On the floor the guess assumes one of three things, switched with G:
 
 | Guess | Players are assumed to | Off by, on average | At most |
 |---|---|---|---|
-| let go (default) | let go of the stick: someone running slides to a stop within a quarter of a second; someone in the air carries on along the arc and lands, or falls through a hole, as the board says | 0.05 | 0.76 |
-| keep going | hold the stick as they were moving | 0.03 | 0.74 |
-| freeze | stand exactly where they were, even in mid-air | 0.25 | 0.81 |
+| keep going (default) | hold the stick as they were moving | 0.02 | 0.74 |
+| let go | let go of the stick: someone running slides to a stop within a quarter of a second | 0.04 | 0.76 |
+| freeze | stand exactly where they were, even in mid-air | 0.25 | 0.91 |
 
-The figures are distances in world units (a bean is 1.8 wide), from the simulated test: a player driven by the physics as a bot plays (running, turning, stopping, jumping), a fixed 100 ms delay, and received packets delayed by 40 to 160 ms with 5% lost, which leaves 292 moments to guess. Each time a snapshot arrives that the screen had to do without, the guess for its moment is compared with what really happened there; the network panel shows the same figure live. Freezing is five to eight times worse than the physics guesses, because a running bean covers 0.13 units per frame. Jumps are the easy part: gravity is the same for everybody, and in the air the stick only steers a little (air control is a third of ground control), so the arc is nearly certain. The largest errors, for all three, come from jumps that started during the gap, which no guess can see coming.
+The figures are distances in world units (a bean is 1.8 wide), from the simulated test: a player driven by the physics as a bot plays (running, turning, stopping, jumping), a fixed 100 ms delay, and received packets delayed by 40 to 160 ms with 5% lost, which leaves 292 moments to guess. Each time a snapshot arrives that the screen had to do without, the guess for its moment is compared with what really happened there; the network panel shows the same figure live. Freezing is six to twelve times worse than the physics guesses, because a running bean covers 0.13 units per frame. A jump in progress is certain; the largest errors, for all three, come from jumps that started during the gap, which no guess can see coming.
 
 After 200 ms the screen stops guessing and waits, with a spinner where the connection's notices go: better to stop than to keep making things up. A player who moves more than 4 units per tick between two snapshots has teleported, and is shown jumping, not sliding.
 
@@ -124,7 +124,7 @@ After 200 ms the screen stops guessing and waits, with a spinner where the conne
 
 *Stutter* is the average, per frame, of how much the moment shown moved differently from real time; on a smooth screen it is 0. With no smoothing it stays high even on a perfect network (15.8 ms in the simulated test), because players move in 33 ms steps. The fixed delay looks smooth by this measure only because guessing keeps players moving; one frame in seven is a guess. With no simulated disturbance the adaptive delay settles at 39 to 41 ms, well under the fixed 100 ms, so it is both smoother on a bad network and more responsive on a good one.
 
-**Trying it.** I cycles none, fixed and adaptive, and G the three guesses (each switch restarts the panel's counters). N cycles the simulated bad network on received packets: off, 20 to 80 ms, and 40 to 160 ms with 5% lost. The network thread applies it (`net_set_inbound`), so one client can see a bad network without changing the server. From the command line: `--interp none|fixed|adaptive`, `--guess let-go|keep|freeze` and `--inbound DELAY:JITTER[:LOSS%]`. On exit the client logs the figures, as in the tables above.
+**Trying it.** I cycles none, fixed and adaptive, and G the three guesses (each switch restarts the panel's counters). N cycles the simulated bad network on received packets: off, 20 to 80 ms, and 40 to 160 ms with 5% lost. The network thread applies it (`net_set_inbound`), so one client can see a bad network without changing the server. From the command line: `--interp none|fixed|adaptive`, `--guess keep|let-go|freeze` and `--inbound DELAY:JITTER[:LOSS%]`. On exit the client logs the figures, as in the tables above.
 
 ## Step 3: prediction and reconciliation
 
@@ -136,22 +136,33 @@ After 200 ms the screen stops guessing and waits, with a spinner where the conne
 
 **Timing.** The server uses one input per tick, in order; the rules are in `common/input_queue.c`, shared by the server and the client so both turn an input into motion the same way. If the newest snapshot is of tick `T` and has used our inputs up to `A`, input `A + k` will be used at tick `T + k`, so after our newest input `L` our bean is at tick `T + (L - A)`. That is our bean's "present": `L - A` ticks ahead of the newest snapshot, and further still ahead of the moment the others are drawn at. Between two input ticks the bean is drawn part of the way to the next step, worked out with the keys as they are at that frame, so a key press shows on the very next frame. The jump cooldown is not in a snapshot; it comes from our own prediction for input `A`.
 
-**Tiles live in two moments.** Our bean is drawn in the present and the others in the past, so no single moment is right for every tile. Drawn at the playout moment, a tile would light up only after we had left it, and could still be drawn while our bean falls through it. So the tiles our bean has been on are drawn at our present moment: they light up as soon as we step on them, before the server says so, and fall when the server says they fall, never on our word alone. If the server has not agreed within 20 ticks that we touched a tile, it goes back to how the server sees it. Every other tile is drawn at the playout moment, with the players on it. Our own knock-out notice also follows our moment.
+**Bumping into others.** The server pushes players apart when they meet (`sim_separate`), and bumping is half the game. For a bump to happen on screen the moment it happens, and for the prediction to agree with the server about it, the others have to be predicted too. So from the newest snapshot the client plays the server's ticks for everybody up to our present: our inputs for us; for the others, the stick held as they were moving (the same guess as in step 2); then everybody pushed apart, in the server's order. That gives each of the others two moments: the playout past, where every position is real, and our present, which is partly a guess. Far from our bean the past is drawn, as in step 2. Within 6 units the present is drawn, so what our bean bumps into is where it is drawn; between 6 and 10 units, a mix, so a bean coming closer slides from one to the other. When a snapshot shows that a guess about someone was wrong, the change is smoothed out like our own corrections.
 
-**What still gets corrected.** Three things make the server do something the prediction did not:
+When two beans meet on screen, both squash and wobble back into shape, lean away from the push, and a few stars fly where they touched; if one of them is ours, the camera jolts. This is judged from where the beans are drawn, so it happens where the player sees them touch.
 
-- **An input that came too late.** If none of ours is waiting when a tick comes, the server uses the old stick once more; if a burst arrives after a stall, it skips some. Either way the bean's path differs by up to one tick of movement.
-- **Being shoved.** Other players push us (`sim_separate`), and the client cannot know where the others really are now.
-- **Rounding.** Positions travel in hundredths of a unit. Very rarely one of the two beans is just over the edge of a hole and the other is not, and one starts to fall a tick earlier.
+**Tiles live in two moments too.** Drawn at the playout moment, a tile would light up only after we had left it, and could still be drawn while our bean falls through it. So the tiles our bean has been on, and the tiles near it, are drawn at our present moment: they light up as soon as we step on them, before the server says so, and fall when the server says they fall, never on our word alone. If the server has not agreed within 20 ticks that we touched a tile, it goes back to how the server sees it. Tiles far away are drawn at the playout moment, with the players on them. Our own knock-out notice also follows our moment.
 
-**Measured** in the simulated test (six rounds of 10 s each, a player running, turning, jumping and falling through floors as a bot plays):
+**What still gets corrected.** Things the client cannot know:
+
+- **An input that came too late.** If none of ours is waiting when a tick comes, the server uses the old stick once more; if a burst arrives after a stall, it skips some. Either way the bean's path differs by up to one tick of movement, and if that happens as we jump, for the whole jump, since nothing steers in the air.
+- **Others changing what they do.** A bump with someone who turned, stopped or jumped since the newest snapshot is predicted against where they would have been.
+- **Rounding.** Positions travel in hundredths of a unit, so in principle one bean can be just over the edge of a hole and the other not. Since the stick does nothing in the air, this no longer shows up in the tests.
+
+**Measured** in the simulated test (rounds of 10 s, a player running, turning, jumping and falling through floors as a bot plays):
 
 | Network | Snapshots | Corrections | Average | Largest | Largest move in one frame |
 |---|---|---|---|---|---|
-| perfect, 50 ms round trip | 1488 | 3 (all rounding) | 0.09 | 0.14 | 0.14 |
-| 30 to 90 ms each way, 5% lost | 1095 | 10 | 0.27 | 0.79 | 0.18 |
+| perfect, 50 ms round trip | 1575 | 0 | – | – | 0.15 |
+| 30 to 90 ms each way, 5% lost | 1351 | 11 | 0.31 | 1.08 | 0.18 |
 
-A bean at full speed moves 0.13 per frame, so even the corrections never show as a jump. A shove of 1.5 units is corrected as a quick slide. Live, against a server that delays its packets by 40 to 80 ms (a 63 ms round trip), the panel estimated that without prediction our moves would show after 177 to 207 ms.
+A bean at full speed moves 0.13 per frame, so even the corrections never show as a jump. Bumps, on the perfect network, with another player holding its stick one way:
+
+| Bump | Largest correction | Without predicting the others |
+|---|---|---|
+| running into a player standing still, and pushing it along | 0.06 | 0.23, every snapshot while pushing |
+| head-on into a player running at us | 0.06 | 0.62 |
+
+A shove the client cannot know about at all, 1.5 units, is corrected as a quick slide. Live, against a server that delays its packets by 40 to 80 ms (a 63 ms round trip), the panel estimated that without prediction our moves would show after 177 to 207 ms.
 
 **At the start and the end of a round.** The first snapshot of a round still carries the ack of an input from before the round, which the server never used for this round; predicting from it would replay seconds of lobby keys. Prediction starts with the first snapshot whose ack is less than 30 inputs old. When the round ends, the server stops moving everybody; our bean glides to where the server stopped it.
 
@@ -161,7 +172,7 @@ A bean at full speed moves 0.13 per frame, so even the corrections never show as
 
 - `tests/test_world.c`: the client's game state fed the messages a server would send, including a late snapshot, a tile that falls on time, a knock-out, and a second WELCOME after a resync.
 - `tests/test_interp.c`: interpolation against a simulated server, network and 60 Hz screen, with simulated time so the result does not depend on the machine. On a perfect network the fixed delay is exactly three ticks with no guessing, the adaptive one just over one tick, and no smoothing stutters. On a bad network (40 to 160 ms, 5% lost) the fixed delay guesses in more than 10% of frames and the adaptive one in under 3%. In every frame that is not a guess the player is drawn exactly where it was at the moment shown. The three guesses are scored on a player driven by the physics; both physics guesses must beat freezing. Also: after a one-second outage the screen waits and then carries on, the adaptive delay comes down slowly once the network recovers, a teleport is not slid across, a server restart starts the history over, and tiles are shown as they were at a given moment.
-- `tests/test_predict.c`: prediction against a server of the test's own (the same input queue and physics as the real one, tiles that fall, snapshots encoded and decoded as on the wire) and a network in each direction, in steps of 1 ms of simulated time. A key press shows on the next frame; on a perfect network nothing but rounding is ever corrected; on a bad network corrections are small and the bean never jumps on screen; a shove is corrected smoothly; tiles under our bean are lit at once and drawn gone on the frame our bean starts to fall; and the stale ack at the start of a round is not predicted from.
+- `tests/test_predict.c`: prediction against a server of the test's own (the same input queue and physics as the real one, tiles that fall, snapshots encoded and decoded as on the wire) and a network in each direction, in steps of 1 ms of simulated time. A key press shows on the next frame; on a perfect network nothing but rounding is ever corrected; on a bad network the bean never jumps on screen; running into another player, and head-on into one, is foreseen; a shove is corrected smoothly; tiles under our bean are lit at once and drawn gone on the frame our bean starts to fall; and the stale ack at the start of a round is not predicted from.
 - `tests/test_msg_queue.c`: a producer and a consumer thread move 300,000 messages through the FIFO (with capacity 1 and 64) and the ring; nothing is lost, duplicated or reordered.
 - `tests/test_clock_sync.c`: lopsided simulated round trips across a 32-bit wrap-around; the estimate stays within 3 ms.
 - `tests/stress_net.sh` (`make stress`): a server, bots, and 16 probes, each with its own network thread, which freeze for 4 seconds every round with a 48-message event queue while 5% of received packets are lost and the rest jittered. The probes check that every probe ends up connected, reliable events never arrive out of order or before the board, every stall led to a resync, and all clock offsets agree.

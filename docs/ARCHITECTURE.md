@@ -90,7 +90,7 @@ Each player is connected, disconnected but within the grace period, or removed. 
 | `common/wire.h` | Big-endian readers and writers; running past a buffer sets a flag and never reads or writes out of bounds |
 | `common/protocol.[ch]` | Message definitions, encoders, decoders |
 | `common/reliable.[ch]` | The UDP reliability layer |
-| `common/sim.[ch]` | Arena and physics, shared by server and clients |
+| `common/sim.[ch]` | Arena and physics, shared by server and clients. The stick works on the floor only: a jump goes where the bean was heading when it left the floor |
 | `common/input_queue.[ch]` | One player's inputs on the server, one per tick; shared so clients predict by the same rules |
 | `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
 | `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
