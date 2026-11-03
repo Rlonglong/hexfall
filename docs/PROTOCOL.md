@@ -51,7 +51,7 @@ unreliable messages up to the end of the packet
 
 | Type | Name | Channel | Payload |
 |---|---|---|---|
-| 64 | WELCOME | reliable | `u64 token`, `u16 player_id`, `u8 color`, `u8 tick_hz`, `u32 server_ms`, `u32 tick` |
+| 64 | WELCOME | reliable | `u64 token` (this connection's session id; send the latest one in HELLO to reclaim the player), `u16 player_id`, `u8 color`, `u8 tick_hz`, `u32 server_ms`, `u32 tick` |
 | 65 | PONG | unreliable | `u32 client_ms` (echoed), `u32 server_ms` |
 | 66 | ROOM | reliable | `u8 phase`, `u32 tick`, `u32 phase_end_tick`, `u8 n`, each player: `u16 id`, `u8 color`, `u8 flags` (1 ready, 2 alive, 4 connected), `u8 place` (1 is the winner, 0 still playing or not placed), `str name` |
 | 67 | SNAPSHOT | unreliable | `u32 tick`, `u16 ack_input`, `u8 n`, each player: `u16 id`, `i16 x, y, z, vx, vy, vz`, `u16 facing`, `u8 flags` (1 grounded, 2 alive), `u8 layer` |
@@ -61,6 +61,7 @@ unreliable messages up to the end of the packet
 | 71 | ERROR | reliable | `u8 code` (1 version mismatch, 2 room full, 3 kicked), `str text` |
 
 - Phases: 0 lobby, 1 countdown, 2 playing, 3 result.
+- The server answers a PING in a packet of its own right away rather than at the next tick, so that `server_ms` is read and sent at the same moment and the round trip stays symmetric.
 - `ack_input` in SNAPSHOT is the INPUT sequence number this client's player was simulated with on that tick; a predicting client replays its inputs after it.
 
 ## The arena

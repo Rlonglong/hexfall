@@ -15,6 +15,7 @@ Built as the final project for the Network Programming course at NYCU.
 - [x] Server: UDP transport, reliability layer, room state machine, shared simulation
 - [x] Headless bot client, which doubles as a load generator
 - [x] Fault injection (packet loss, delay, jitter) for testing and demos
+- [x] Client network thread with NTP-style clock sync, stress-tested and checked with ThreadSanitizer
 - [ ] Desktop client (raylib) with client-side prediction and interpolation
 - [ ] Browser client over a hand-written WebSocket server
 
@@ -32,7 +33,7 @@ make
 make test
 ```
 
-`make asan` rebuilds everything with AddressSanitizer and UndefinedBehaviorSanitizer and runs the tests again, including a fuzz pass over the message decoders.
+`make asan` rebuilds everything with AddressSanitizer and UndefinedBehaviorSanitizer and runs the tests again, including a fuzz pass over the message decoders. `make stress` runs a server, bots and many client network threads that stall on purpose; `make tsan` runs the threaded tests under ThreadSanitizer.
 
 ## Run
 

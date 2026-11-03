@@ -43,7 +43,8 @@ The class is a property of the message type (`hf_msg_is_reliable()`), shared by 
 
 - **Handshake.** A client's first packets carry session 0 and a HELLO. The server matches them by source address, replies with WELCOME carrying a random 64-bit token, and from then on the client puts the token in every packet.
 - **Changing networks.** The server recognises clients by token, not by address. When a phone moves from Wi-Fi to cellular, or a NAT picks a new external port, the server sees the right token from a new address and simply updates the address.
-- **Losing a connection.** After 4 seconds without a packet the connection is considered lost. The player's slot is kept for 15 seconds; a HELLO carrying the old token within that time reclaims the same player.
+- **Losing a connection.** After 4 seconds without a packet the connection is considered lost. The player's slot is kept for 15 seconds; a HELLO carrying the latest token within that time reclaims the same player.
+- **Every connection gets a fresh token,** even one that reclaims a player. Packets still in flight from the old connection then carry a token nobody owns and are dropped as stale, instead of mixing their sequence numbers and acknowledgements into the new connection's reliability state.
 - **Heartbeats.** Both sides send at least one packet per tick (33 ms), carrying acknowledgements at minimum, so no separate heartbeat message is needed. This also keeps NAT mappings on the client's side alive.
 
 ## The server loop (`server/main.c`)
@@ -108,9 +109,10 @@ Each player is connected, disconnected but within the grace period, or removed. 
 
 ## Next steps
 
-- [ ] Desktop client (raylib) on top of `net_client`
+- [x] Client network thread, channels and clock synchronisation (see [CLIENT.md](CLIENT.md))
+- [ ] Desktop client (raylib) on top of the network thread
 - [ ] Client-side prediction of the local player, reconciled with `ack_input`
-- [ ] Interpolation of remote players
-- [ ] Clock synchronisation from PING/PONG, and lag compensation for jumps
+- [ ] Interpolation of remote players: none, fixed delay, adaptive delay
+- [ ] Lag compensation for jumps
 - [ ] Reconnect testing with bots (HELLO with a resume token)
 - [ ] Monitoring panel: RTT, resends and loss per connection
