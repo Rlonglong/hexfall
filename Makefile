@@ -8,9 +8,10 @@ LDLIBS  += -lm -lpthread
 COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c
 NETCLI  := client/net_client.c
 NETTHR  := client/net_thread.c client/msg_queue.c client/clock_sync.c $(NETCLI)
+WORLD   := client/world.c
 SERVER  := server/main.c server/udp.c server/room.c
 HEADERS := $(wildcard common/*.h server/*.h client/*.h)
-TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/golden
+TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/golden
 
 all: build/hexfall-server build/hexfall-bot build/hexfall-netprobe
 
@@ -26,8 +27,8 @@ build/hexfall-bot: client/bot.c $(NETCLI) $(COMMON) $(HEADERS) | build
 build/hexfall-netprobe: client/netprobe.c $(NETTHR) $(COMMON) $(HEADERS) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ client/netprobe.c $(NETTHR) $(COMMON) $(LDLIBS)
 
-build/test_%: tests/test_%.c $(NETTHR) $(COMMON) $(HEADERS) | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(NETTHR) $(COMMON) $(LDLIBS)
+build/test_%: tests/test_%.c $(WORLD) $(NETTHR) $(COMMON) $(HEADERS) | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(WORLD) $(NETTHR) $(COMMON) $(LDLIBS)
 
 build/golden: tests/golden.c $(COMMON) $(HEADERS) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/golden.c $(COMMON) $(LDLIBS)
@@ -39,6 +40,7 @@ test: $(TESTS)
 	./build/test_reliable
 	./build/test_msg_queue
 	./build/test_clock_sync
+	./build/test_world
 	./build/golden build/golden.bin
 	node tests/test_protocol_js.mjs build/golden.bin
 
