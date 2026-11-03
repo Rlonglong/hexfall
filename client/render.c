@@ -122,6 +122,8 @@ typedef struct {
     uint16_t id;
     int used, was_alive;
     float face;
+    float bump;            /* 1 the moment it bumps into someone, fading to 0 */
+    float push_x, push_z;  /* the way it was pushed */
 } bean_look;
 
 typedef struct {
@@ -140,7 +142,10 @@ static float cam_yaw, cam_back, cam_up, cam_ahead, cam_look;
 static Vector3 cam_centre;
 static uint64_t last_frame_ms, start_ms, phase_seen_ms, count_seen_ms;
 static int last_phase = -1, phase_before = -1, last_count;
-static bean_look looks[HF_MAX_PLAYERS * 2];
+#define LOOKS (HF_MAX_PLAYERS * 2)
+static bean_look looks[LOOKS];
+static uint8_t touching[LOOKS][LOOKS];  /* two beans in contact: bumped already */
+static float shake;                     /* the camera's jolt after we bump into someone, fading */
 static particle parts[PARTICLES];
 static int part_head;
 static uint8_t seen_state[SIM_LAYERS][SIM_TILES];
@@ -440,6 +445,11 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     cam.position = (Vector3){cam_centre.x + sy * cam_back, cam_centre.y + cam_up, cam_centre.z + cy * cam_back};
     cam.target = (Vector3){cam_centre.x - sy * cam_ahead, cam_centre.y + cam_look, cam_centre.z - cy * cam_ahead};
     cam.fovy += ((chase ? 52.0f : 45.0f) - cam.fovy) * r;
+    if (shake > 0) {
+        Vector3 jolt = {(rnd() - 0.5f) * 0.5f * shake, (rnd() - 0.5f) * 0.3f * shake, (rnd() - 0.5f) * 0.5f * shake};
+        cam.position = Vector3Add(cam.position, jolt);
+        cam.target = Vector3Add(cam.target, jolt);
+    }
     cam_ready = 1;
 }
 
@@ -536,8 +546,12 @@ static void draw_bean(const world_body *b, const bean_look *lk, Color color, flo
     float speed = sqrtf(b->vx * b->vx + b->vz * b->vz);
     float lean = fminf(0.35f, speed * 0.04f);
     float bob = b->grounded && speed > 1 ? fabsf(sinf(t * 14 + b->x)) * 0.25f : 0;
-    Matrix root = MatrixMultiply(MatrixRotateY(lk->face), MatrixTranslate(b->x, b->y, b->z));
-    Matrix inner = MatrixMultiply(MatrixMultiply(MatrixRotateX(lean), MatrixTranslate(0, bob, 0)), root);
+    /* After a bump: squashed, wobbling back into shape, knocked back the way it was pushed. */
+    float wobble = lk->bump > 0 ? sinf((1 - lk->bump) * 3 * PI) * lk->bump : 0;
+    Matrix squash = MatrixScale(1 + 0.28f * wobble, 1 - 0.22f * wobble, 1 + 0.28f * wobble);
+    Matrix knock = MatrixRotate((Vector3){lk->push_z, 0, -lk->push_x}, 0.45f * lk->bump);
+    Matrix root = MatrixMultiply(MatrixMultiply(MatrixRotateY(lk->face), knock), MatrixTranslate(b->x, b->y, b->z));
+    Matrix inner = MatrixMultiply(MatrixMultiply(MatrixMultiply(squash, MatrixRotateX(lean)), MatrixTranslate(0, bob, 0)), root);
     draw_mesh(ball, color, MatrixMultiply(at(0, 1.25f, 0, 0.9f, 1.25f, 0.9f), inner));
     for (int side = -1; side <= 1; side += 2) {
         draw_mesh(ball, WHITE, MatrixMultiply(at(0.32f * side, 1.78f, 0.7f, 0.24f, 0.24f, 0.24f), inner));
@@ -637,6 +651,47 @@ static void watch_beans(const world *w, const interp_view *v, float dt)
         }
         lk->was_alive = b->alive;
     }
+}
+
+static void bumped(bean_look *lk, float nx, float nz)
+{
+    lk->bump = 1;
+    lk->push_x = nx;
+    lk->push_z = nz;
+}
+
+/* Two beans that meet bump: both squash, stars fly where they touch, and
+ * if one of them is ours the camera jolts. Judged from where the beans are
+ * drawn, so it happens where the player sees them touch, whichever moment
+ * each one is drawn at. */
+static void watch_bumps(const world *w, const interp_view *v, float dt)
+{
+    const float meet = 2 * SIM_BODY_RADIUS + 0.06f, apart = 2 * SIM_BODY_RADIUS + 0.4f;
+    for (int i = 0; i < LOOKS; i++)
+        looks[i].bump = fmaxf(0, looks[i].bump - dt / 0.4f);
+    shake = fmaxf(0, shake - dt / 0.3f);
+    for (int i = 0; i < v->count; i++)
+        for (int j = i + 1; j < v->count; j++) {
+            const world_body *a = &v->bodies[i], *b = &v->bodies[j];
+            bean_look *la = look_for(a->id, a->facing), *lb = look_for(b->id, b->facing);
+            long ia = la - looks, ib = lb - looks;
+            uint8_t *contact = &touching[ia < ib ? ia : ib][ia < ib ? ib : ia];
+            float dx = b->x - a->x, dz = b->z - a->z, d = sqrtf(dx * dx + dz * dz);
+            if (!a->alive || !b->alive || fabsf(a->y - b->y) > 1.6f || d > apart) {
+                *contact = 0;
+                continue;
+            }
+            if (*contact || d > meet)
+                continue;
+            *contact = 1;
+            float nx = d > 0 ? dx / d : 1, nz = d > 0 ? dz / d : 0;
+            bumped(la, -nx, -nz);
+            bumped(lb, nx, nz);
+            Color stars[3] = {WHITE, AMBER, {255, 236, 160, 255}};
+            burst(a->x + dx / 2, (a->y + b->y) / 2 + 1.4f, a->z + dz / 2, stars, 3, 14, 5);
+            if (a->id == w->me || b->id == w->me)
+                shake = 1;
+        }
 }
 
 /* ================================================================ HUD */
@@ -1018,19 +1073,10 @@ static void draw_network_panel(const world *w, const interp *ip, const predict *
 void render_frame(const world *w, const interp *ip, const predict *pr, const net_status *st,
                   const render_options *opt, uint64_t now_ms)
 {
-    /* The others as the interpolation shows them, our own bean where the
-     * prediction has it. */
+    /* The others as the interpolation shows them, our own bean and the
+     * others near it as the prediction has them. */
     static interp_view scene;
-    scene = ip->view;
-    if (pr->shown_valid) {
-        int i = 0;
-        while (i < scene.count && scene.bodies[i].id != w->me)
-            i++;
-        if (i == scene.count && scene.count < HF_MAX_PLAYERS)
-            scene.count++;
-        if (i < scene.count)
-            scene.bodies[i] = pr->shown;
-    }
+    predict_scene(pr, w, &ip->view, &scene);
     pred = pr;
     const interp_view *v = &scene;
     float dt = last_frame_ms ? (float)(now_ms - last_frame_ms) / 1000.0f : 0.0f;
@@ -1055,6 +1101,8 @@ void render_frame(const world *w, const interp *ip, const predict *pr, const net
     if (w->have_board)
         watch_tiles(w, v);
     watch_beans(w, v, dt);
+    if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)
+        watch_bumps(w, v, dt);
     step_particles(dt);
     update_camera(w, v, opt, dt, t);
 
