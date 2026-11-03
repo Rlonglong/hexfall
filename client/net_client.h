@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 
 #include "protocol.h"
 #include "reliable.h"
@@ -13,7 +14,10 @@
  * use the same code, and only add drawing and keyboard input. */
 
 typedef struct hf_client hf_client;
-typedef void (*hf_client_msg_fn)(hf_client *cl, uint8_t type, rbuf *payload, void *user);
+/* Called once per delivered message: its type, a reader on its payload, and
+ * the whole message (header included) for callers that pass it on. */
+typedef void (*hf_client_msg_fn)(hf_client *cl, uint8_t type, rbuf *payload, const uint8_t *msg, size_t len,
+                                 void *user);
 
 struct hf_client {
     int fd;
@@ -35,6 +39,11 @@ int hf_client_open(hf_client *cl, const struct sockaddr *server, socklen_t len, 
 void hf_client_hello(hf_client *cl, const char *name, uint8_t kind, uint64_t resume_token);
 void hf_client_send(hf_client *cl, const uint8_t *msg, size_t len);  /* channel picked by type */
 void hf_client_receive(hf_client *cl, uint64_t now_ms);              /* drains the socket */
+
+/* The two halves of hf_client_receive, for a caller that holds packets back
+ * before processing them (the network thread's inbound fault injection). */
+ssize_t hf_client_recv_datagram(hf_client *cl, uint8_t *buf, size_t cap);  /* -1 when none is waiting */
+void hf_client_process(hf_client *cl, const uint8_t *buf, size_t len, uint64_t now_ms);
 void hf_client_flush(hf_client *cl, uint64_t now_ms);                /* call once per tick */
 void hf_client_close(hf_client *cl);
 

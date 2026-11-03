@@ -17,8 +17,8 @@ typedef struct {
     uint8_t data[HF_MAX_PACKET];
 } delayed;
 
-static netsim_cfg cfg;
-static delayed *queue;  /* allocated the first time a packet is delayed */
+static netsim_cfg cfg;                /* set before threads start, then only read */
+static _Thread_local delayed *queue;  /* this thread's; allocated on first use */
 
 static void raw_send(int fd, const void *buf, size_t len, const struct sockaddr *to, socklen_t tolen)
 {
@@ -89,4 +89,21 @@ int netsim_wait_ms(uint64_t now_ms)
             best = wait;
     }
     return best;
+}
+
+void netsim_release(void)
+{
+    free(queue);
+    queue = NULL;
+}
+
+void netsim_forget_fd(int fd)
+{
+    /* The next socket opened will likely get the same number, and must not
+     * send the old socket's packets. */
+    if (!queue)
+        return;
+    for (int i = 0; i < QUEUE_SLOTS; i++)
+        if (queue[i].used && queue[i].fd == fd)
+            queue[i].used = 0;
 }

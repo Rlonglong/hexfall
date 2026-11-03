@@ -88,28 +88,36 @@ static void deliver(void *ctx, const uint8_t *msg, size_t len)
         }
     }
     if (cl->on_msg)
-        cl->on_msg(cl, type, &payload, cl->user);
+        cl->on_msg(cl, type, &payload, msg, len, cl->user);
+}
+
+ssize_t hf_client_recv_datagram(hf_client *cl, uint8_t *buf, size_t cap)
+{
+    for (;;) {
+        ssize_t n = recv(cl->fd, buf, cap, 0);
+        if (n >= 0 || errno != EINTR)
+            return n;  /* -1: EAGAIN, or ECONNREFUSED while nothing listens on the server port */
+    }
+}
+
+void hf_client_process(hf_client *cl, const uint8_t *buf, size_t len, uint64_t now_ms)
+{
+    rbuf r;
+    uint64_t session;
+    rb_init(&r, buf, len);
+    if (!hf_get_udp_header(&r, &session))
+        return;
+    cl->last_recv_ms = now_ms;
+    cl->bytes_in += len;
+    rel_read_packet(&cl->rel, now_ms, &r, deliver, cl);
 }
 
 void hf_client_receive(hf_client *cl, uint64_t now_ms)
 {
     uint8_t buf[2048];
-    for (;;) {
-        ssize_t n = recv(cl->fd, buf, sizeof buf, 0);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return;  /* EAGAIN, or ECONNREFUSED while nothing listens on the server port */
-        }
-        rbuf r;
-        uint64_t session;
-        rb_init(&r, buf, (size_t)n);
-        if (!hf_get_udp_header(&r, &session))
-            continue;
-        cl->last_recv_ms = now_ms;
-        cl->bytes_in += (uint64_t)n;
-        rel_read_packet(&cl->rel, now_ms, &r, deliver, cl);
-    }
+    ssize_t n;
+    while ((n = hf_client_recv_datagram(cl, buf, sizeof buf)) >= 0)
+        hf_client_process(cl, buf, (size_t)n, now_ms);
 }
 
 void hf_client_flush(hf_client *cl, uint64_t now_ms)
@@ -132,7 +140,9 @@ void hf_client_flush(hf_client *cl, uint64_t now_ms)
 
 void hf_client_close(hf_client *cl)
 {
-    if (cl->fd >= 0)
+    if (cl->fd >= 0) {
+        netsim_forget_fd(cl->fd);
         close(cl->fd);
+    }
     cl->fd = -1;
 }

@@ -77,9 +77,11 @@ static void apply_tiles(bot *b, const msg_tiles *m)
     }
 }
 
-static void on_msg(hf_client *cl, uint8_t type, rbuf *p, void *user)
+static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, size_t len, void *user)
 {
     bot *b = user;
+    (void)msg;
+    (void)len;
     switch (type) {
     case MSG_WELCOME:
         send_ready(b);

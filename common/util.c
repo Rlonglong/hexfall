@@ -25,7 +25,7 @@ uint64_t hf_random_u64(void)
     return v;
 }
 
-static uint64_t rng_state;
+static _Thread_local uint64_t rng_state;  /* one generator per thread, no sharing */
 
 double hf_random01(void)
 {

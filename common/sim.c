@@ -87,7 +87,7 @@ static int solid_tile(const sim_arena *a, int layer, float x, float z, int *q, i
     if (layer < 0 || layer >= SIM_LAYERS || !sim_world_tile(x, z, q, r))
         return -1;
     int i = sim_tile_index(*q, *r);
-    return a->tiles[layer][i].state == TILE_GONE ? -1 : i;
+    return i < 0 || a->tiles[layer][i].state == TILE_GONE ? -1 : i;
 }
 
 int sim_tile_state_at(const sim_arena *a, int layer, float x, float z)
@@ -95,7 +95,8 @@ int sim_tile_state_at(const sim_arena *a, int layer, float x, float z)
     int q, r;
     if (layer < 0 || layer >= SIM_LAYERS || !sim_world_tile(x, z, &q, &r))
         return -1;
-    return a->tiles[layer][sim_tile_index(q, r)].state;
+    int i = sim_tile_index(q, r);
+    return i < 0 ? -1 : a->tiles[layer][i].state;
 }
 
 void sim_arena_reset(sim_arena *a)
