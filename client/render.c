@@ -15,7 +15,8 @@
  * around a purple slime, and a dark broadcast-style HUD where amber always
  * means "you". Everything this file keeps is for looks only. Where a bean
  * stands, and the moment the whole scene shows (tiles included), come from
- * the interpolation's view; see interp.h. */
+ * the interpolation's view (interp.h), except for our own bean and the
+ * tiles it has been on, which come from the prediction (predict.h). */
 
 #define SKY ((Color){168, 214, 232, 255})
 #define SLIME ((Color){176, 106, 224, 255})
@@ -143,6 +144,8 @@ static bean_look looks[HF_MAX_PLAYERS * 2];
 static particle parts[PARTICLES];
 static int part_head;
 static uint8_t seen_state[SIM_LAYERS][SIM_TILES];
+static const predict *pred;  /* this frame's, for the tiles */
+static int was_chase;
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static float rnd(void) { return (float)hf_random01(); }
@@ -401,8 +404,12 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     Vector3 centre = {0, focus_y, 0};
     float back = 40, up = 52, ahead = 4, look = -1, want_yaw = opt->yaw;
     if (chase) {
+        /* The mouse tilts it. It stays low enough to be under the floor
+         * above, so it comes closer to look down steeply. */
         centre = (Vector3){me->x, me->y, me->z};
-        back = 17, up = 10.5f, ahead = 3, look = 0.5f;  /* low enough to stay under the floor above */
+        up = fminf(20 * sinf(opt->pitch), 11);
+        back = up / tanf(opt->pitch);
+        ahead = 3, look = 0.5f;
     } else if (w->phase == PHASE_LOBBY) {
         back = 40, up = 46, ahead = 0, look = -8;  /* inside the ring of pillars */
         want_yaw = t * 0.08f;                      /* a slow orbit while people get ready */
@@ -420,11 +427,15 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
         swinging = 0;
     cam_yaw += swinging && cam_ready ? turn * r : turn;
 
+    /* A tilt with the mouse is used at once, like a turn; a change of view
+     * (chase, overview, lobby) glides. */
+    float glide = chase && was_chase ? 1.0f : r;
+    was_chase = chase;
     cam_centre = cam_ready ? Vector3Lerp(cam_centre, centre, r) : centre;
-    cam_back += (back - cam_back) * r;
-    cam_up += (up - cam_up) * r;
-    cam_ahead += (ahead - cam_ahead) * r;
-    cam_look += (look - cam_look) * r;
+    cam_back += (back - cam_back) * glide;
+    cam_up += (up - cam_up) * glide;
+    cam_ahead += (ahead - cam_ahead) * glide;
+    cam_look += (look - cam_look) * glide;
     float sy = sinf(cam_yaw), cy = cosf(cam_yaw);
     cam.position = (Vector3){cam_centre.x + sy * cam_back, cam_centre.y + cam_up, cam_centre.z + cy * cam_back};
     cam.target = (Vector3){cam_centre.x - sy * cam_ahead, cam_centre.y + cam_look, cam_centre.z - cy * cam_ahead};
@@ -433,11 +444,22 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
 }
 
 /* Tiles are drawn as they were at the moment the view shows. */
+/* A tile as it is drawn: the ones our bean has been on at our own moment,
+ * the rest at the view's (predict.h). *since: ticks since it was touched. */
+static int tile_state(const world *w, const interp_view *v, int layer, int index, sim_tile *t, float *since)
+{
+    double at;
+    predict_tile(pred, w, layer, index, v->tick, t, &at);
+    *since = (float)(at - (double)t->touch_tick);
+    return interp_tile_state(t, at);
+}
+
 static void draw_tile(const world *w, const interp_view *v, int layer, int index, float alpha)
 {
-    const sim_tile *t = &w->arena.tiles[layer][index];
-    int state = interp_tile_state(t, v->tick);
-    float since = (float)(v->tick - (double)t->touch_tick);  /* ticks since it was touched */
+    sim_tile tile;
+    float since;  /* ticks since it was touched */
+    int state = tile_state(w, v, layer, index, &tile, &since);
+    const sim_tile *t = &tile;
     int q, r;
     float x, z, y = SIM_LAYER_Y[layer] - 0.4f;
     sim_tile_qr(index, &q, &r);
@@ -476,10 +498,11 @@ static void watch_tiles(const world *w, const interp_view *v)
 {
     for (int layer = 0; layer < SIM_LAYERS; layer++)
         for (int i = 0; i < SIM_TILES; i++) {
-            const sim_tile *t = &w->arena.tiles[layer][i];
-            int state = interp_tile_state(t, v->tick);
-            if (state == TILE_GONE && seen_state[layer][i] != TILE_GONE && t->touch_tick != 0 &&
-                v->tick - (double)(t->touch_tick + SIM_FALL_TICKS) < 3 && rnd() < 0.5f) {
+            sim_tile t;
+            float since;
+            int state = tile_state(w, v, layer, i, &t, &since);
+            if (state == TILE_GONE && seen_state[layer][i] != TILE_GONE && t.touch_tick != 0 &&
+                since - SIM_FALL_TICKS < 3 && rnd() < 0.5f) {
                 int q, r;
                 float x, z;
                 sim_tile_qr(i, &q, &r);
@@ -497,8 +520,9 @@ static void draw_shadow(const world *w, const interp_view *v, const world_body *
     if (!sim_world_tile(b->x, b->z, &q, &r))
         return;
     for (int layer = 0; layer < SIM_LAYERS; layer++) {
-        float h = SIM_LAYER_Y[layer];
-        int state = interp_tile_state(&w->arena.tiles[layer][sim_tile_index(q, r)], v->tick);
+        float h = SIM_LAYER_Y[layer], since;
+        sim_tile t;
+        int state = tile_state(w, v, layer, sim_tile_index(q, r), &t, &since);
         if (h > b->y + 0.01f || state == TILE_GONE)
             continue;
         float s = 0.95f * clampf(1.0f - (b->y - h) / 8.0f, 0.4f, 1.0f);
@@ -761,7 +785,9 @@ static void draw_feed(const world *w, const interp_view *v, uint64_t now_ms)
     for (int i = w->note_count - 1; i >= 0; i--) {  /* newest on top */
         const world_note *n = &w->notes[i];
         float age = (float)(now_ms - n->at_ms) / 1000.0f, a = clampf((5.0f - age) / 0.5f, 0, 1);
-        if (age > 5.0f || (n->knockout && v->tick < (double)n->tick))
+        /* Our own knock-out is on our own moment (predict.h), the others' on the view's. */
+        double moment = n->player == w->me && pred->shown_valid ? pred->shown_tick : v->tick;
+        if (age > 5.0f || (n->knockout && moment < (double)n->tick))
             continue;  /* faded, or the bean has not reached the slime on screen yet */
         float size = 15, h = 26;
         if (n->knockout) {
@@ -906,15 +932,35 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
         pill(what, 20, SIGNAL, WHITE);
     }
 
-    const char *keys = "WASD move   SPACE jump   drag or Q/E turn   C camera   ENTER ready   F1 network";
+    const char *keys = opt->mouse_look ? "WASD move   SPACE jump   mouse turn   ESC free the mouse   C camera   ENTER ready   F1 network"
+                                       : "WASD move   SPACE jump   click to turn with the mouse   C camera   ENTER ready   F1 network";
     float kw = text_width(keys, 13);
     box(sw - kw - 34, sh - 40, kw + 18, 26, 4, BOOTH);
     text(keys, sw - kw - 25, sh - 34, 13, FG);
 }
 
-static void draw_network_panel(const world *w, const interp *ip, const net_status *st)
+/* The screen has stopped and waits for snapshots (interp.h): a spinner
+ * where the connection's own notices go. Faded in, so that a short wait
+ * does not flash. */
+static void draw_waiting(const interp *ip, float t)
 {
-    char lines[7][128];
+    float a = clampf(((float)ip->waiting_ms - 100) / 200, 0, 1);
+    if (a <= 0)
+        return;
+    const char *s = "Waiting for the server";
+    float size = 17, tw = text_width(s, size), bh = size + 14, bw = tw + 32 + 26;
+    float x = ((float)GetScreenWidth() - bw) / 2, y = 20;
+    box(x, y, bw, bh, bh / 2, faded(BOOTH, a));
+    Vector2 c = {x + 24, y + bh / 2};
+    float start = fmodf(t * 300, 360);
+    DrawRing(c, 6, 9, 0, 360, 32, faded(MUTED, 0.5f * a));
+    DrawRing(c, 6, 9, start, start + 110, 16, faded(AMBER, a));
+    text(s, x + 42, y + 7, size, faded(FG, a));
+}
+
+static void draw_network_panel(const world *w, const interp *ip, const predict *pr, const net_status *st)
+{
+    char lines[9][160];
     double frames = ip->frames ? (double)ip->frames : 1;
     snprintf(lines[0], sizeof lines[0], "Connection  %s   sessions %llu   resyncs %llu   clock %s",
              net_state_name(st->state), (unsigned long long)st->sessions, (unsigned long long)st->resyncs,
@@ -928,22 +974,36 @@ static void draw_network_panel(const world *w, const interp *ip, const net_statu
     if (ip->mode == INTERP_NONE)
         snprintf(lines[4], sizeof lines[4], "Smoothing  none: the newest snapshot as it is");
     else
-        snprintf(lines[4], sizeof lines[4], "Smoothing  %s   drawing %.0f ms in the past", interp_mode_name(ip->mode),
+        snprintf(lines[4], sizeof lines[4], "Smoothing  %s   others drawn %.0f ms in the past", interp_mode_name(ip->mode),
                  ip->delay_ms);
-    snprintf(lines[5], sizeof lines[5], "Screen  stutter %.1f ms   extrapolated %.1f%%   stopped %.1f%%   %d fps",
-             ip->stutter_ms, 100 * (double)ip->frames_extrapolated / frames, 100 * (double)ip->frames_stopped / frames,
-             GetFPS());
+    snprintf(lines[5], sizeof lines[5], "Screen  stutter %.1f ms   guessed %.1f%%   waited %.1f%%   %d fps", ip->stutter_ms,
+             100 * (double)ip->frames_guessed / frames, 100 * (double)ip->frames_waiting / frames, GetFPS());
+    if (ip->guess_errors)
+        snprintf(lines[6], sizeof lines[6], "Guess  %s   off by %.2f on average, %.2f at most", interp_guess_name(ip->guess),
+                 ip->guess_error_sum / (double)ip->guess_errors, ip->guess_error_max);
+    else
+        snprintf(lines[6], sizeof lines[6], "Guess  %s   nothing guessed yet", interp_guess_name(ip->guess));
+    /* Without prediction a press shows once the server has used it (the
+     * inputs ahead of it) and the snapshot has waited its turn on screen. */
+    double felt = pr->ahead * 1000.0 / SIM_TICK_HZ + ip->delay_ms;
+    if (!pr->enabled)
+        snprintf(lines[7], sizeof lines[7], "Prediction  off: your moves show after ~%.0f ms", felt);
+    else if (!pr->snapshots)
+        snprintf(lines[7], sizeof lines[7], "Prediction  on: waiting for a round");
+    else
+        snprintf(lines[7], sizeof lines[7], "Prediction  on: moves show at once, not after ~%.0f ms   corrected %llu times, %.2f on average",
+                 felt, (unsigned long long)pr->corrections, pr->corrections ? pr->correction_sum / (double)pr->corrections : 0);
     const netsim_cfg *in = &st->inbound;
     if (in->delay_ms == 0 && in->jitter_ms == 0 && in->loss <= 0)
-        snprintf(lines[6], sizeof lines[6], "Simulated bad network  off");
+        snprintf(lines[8], sizeof lines[8], "Simulated bad network  off");
     else
-        snprintf(lines[6], sizeof lines[6], "Simulated bad network  +%d..%d ms, %.0f%% lost", in->delay_ms,
+        snprintf(lines[8], sizeof lines[8], "Simulated bad network  +%d..%d ms, %.0f%% lost", in->delay_ms,
                  in->delay_ms + in->jitter_ms, 100 * in->loss);
-    int n = 7;
+    int n = 9;
     float size = 14, row = 19, wide = 0;
     for (int i = 0; i < n; i++)
         wide = fmaxf(wide, text_width(lines[i], size));
-    const char *keys = "I smoothing    N bad network";
+    const char *keys = "I smoothing   G guess   P prediction   N bad network";
     wide = fmaxf(wide, label_width("NETWORK", 13) + 24 + text_width(keys, 13));
     float h = 34 + (float)n * row, y = (float)GetScreenHeight() - h - 14;
     box(14, y, wide + 28, h, 4, BOOTH);
@@ -955,10 +1015,24 @@ static void draw_network_panel(const world *w, const interp *ip, const net_statu
 
 /* ================================================================ frame */
 
-void render_frame(const world *w, const interp *ip, const net_status *st, const render_options *opt,
-                  uint64_t now_ms)
+void render_frame(const world *w, const interp *ip, const predict *pr, const net_status *st,
+                  const render_options *opt, uint64_t now_ms)
 {
-    const interp_view *v = &ip->view;
+    /* The others as the interpolation shows them, our own bean where the
+     * prediction has it. */
+    static interp_view scene;
+    scene = ip->view;
+    if (pr->shown_valid) {
+        int i = 0;
+        while (i < scene.count && scene.bodies[i].id != w->me)
+            i++;
+        if (i == scene.count && scene.count < HF_MAX_PLAYERS)
+            scene.count++;
+        if (i < scene.count)
+            scene.bodies[i] = pr->shown;
+    }
+    pred = pr;
+    const interp_view *v = &scene;
     float dt = last_frame_ms ? (float)(now_ms - last_frame_ms) / 1000.0f : 0.0f;
     float t = (float)(now_ms - start_ms) / 1000.0f;
     last_frame_ms = now_ms;
@@ -993,7 +1067,9 @@ void render_frame(const world *w, const interp *ip, const net_status *st, const 
     if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)
         draw_tags(w, v);
     draw_hud(w, v, st, opt, now_ms);
+    if (st->state == NET_CONNECTED && w->welcomed)
+        draw_waiting(ip, t);
     if (opt->show_network)
-        draw_network_panel(w, ip, st);
+        draw_network_panel(w, ip, pr, st);
     EndDrawing();
 }
