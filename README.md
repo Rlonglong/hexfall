@@ -1,6 +1,6 @@
 # Hex Fall
 
-A real-time multiplayer knockout game. Players run across stacked floors of hexagonal tiles; every tile you step on falls away half a second later, and the last player standing wins.
+A real-time multiplayer knockout game. Players run across stacked floors of hexagonal tiles; every tile you step on falls away a moment later, and the last player standing wins.
 
 The project is a study in game networking on plain sockets, with no networking libraries:
 
@@ -56,7 +56,7 @@ Simulate a bad network. Both programs accept these flags; give them to both to d
 ./build/hexfall-server --port 8080 --loss 10 --delay 40 --jitter 40
 ```
 
-Play with the desktop client (WASD or arrow keys to move, Space to jump, click into the window and move the mouse to turn the camera, Esc to let the mouse go, Q/E also turn, Enter to get ready, C to switch camera, F1 for the network panel; to compare techniques: I smoothing, G guessing, P prediction, N to simulate a bad network):
+Play with the desktop client (WASD or arrow keys to move, and run straight for a second to break into a sprint; Space to jump, click into the window and move the mouse to turn the camera, Esc to let the mouse go, Q/E also turn, Enter to get ready, C to switch camera, F1 for the network panel; to compare techniques: I smoothing, G guessing, P prediction, N to simulate a bad network):
 
 ```bash
 ./build/hexfall-client --port 8080 --name alice

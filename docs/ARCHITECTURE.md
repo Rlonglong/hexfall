@@ -71,6 +71,8 @@ LOBBY ──enough players, all ready──> COUNTDOWN ──3 s──> PLAYING 
 
 Each player is connected, disconnected but within the grace period, or removed. During a round a player is either still on the board or eliminated with a finishing place.
 
+For the first 2 s of a round the floor holds: nothing that is stepped on starts to fall, so everybody can find their feet. While PLAYING, the ROOM message's `phase_end_tick` is the tick the floor starts to give way. Back in the lobby the board is whole again, so the lobby and the countdown already show the next round's.
+
 ## Inputs and prediction
 
 - A client sends one INPUT per tick. Every input sample has a sequence number, and each INPUT repeats the newest four samples, so losing a packet loses no input.
@@ -80,7 +82,7 @@ Each player is connected, disconnected but within the grace period, or removed. 
 ## Tiles
 
 - When a tile is stepped on, the server broadcasts once that this tile on this floor was touched at this tick (TILE_EVENTS).
-- A touched tile falls exactly 16 ticks later (about 0.53 s). Every client can work that out, so the whole board never needs to be sent every tick.
+- A touched tile falls exactly 24 ticks later (0.8 s). Every client can work that out, so the whole board never needs to be sent every tick.
 - New clients, and ticks where too many tiles were touched for one event message, get the whole board instead (TILES: one bit per tile, 82 bytes for all 651 tiles).
 
 ## Files
@@ -90,13 +92,13 @@ Each player is connected, disconnected but within the grace period, or removed. 
 | `common/wire.h` | Big-endian readers and writers; running past a buffer sets a flag and never reads or writes out of bounds |
 | `common/protocol.[ch]` | Message definitions, encoders, decoders |
 | `common/reliable.[ch]` | The UDP reliability layer |
-| `common/sim.[ch]` | Arena and physics, shared by server and clients. The stick works on the floor only: a jump goes where the bean was heading when it left the floor |
+| `common/sim.[ch]` | Arena and physics, shared by server and clients. The stick works on the floor only: a jump goes where the bean was heading when it left the floor. Running straight for about a second breaks into a sprint (8 to 11 units per second), so a sprinting jump goes furthest; the velocity is all the state a sprint has |
 | `common/input_queue.[ch]` | One player's inputs on the server, one per tick; shared so clients predict by the same rules |
 | `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
 | `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
 | `server/room.c` | The game: lobby, rounds, eliminations |
 | `client/net_client.[ch]` | Desktop networking core, shared by bots and the desktop client |
-| `client/bot.c` | Headless bots, also a load generator |
+| `client/bot.c` | Headless bots, also a load generator; they start a new session when the server goes quiet, so they survive a server restart |
 | `web/protocol.js` | Browser codec, byte-for-byte compatible with the C one |
 
 ## Adding the WebSocket transport

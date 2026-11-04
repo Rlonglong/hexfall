@@ -61,6 +61,7 @@ unreliable messages up to the end of the packet
 | 71 | ERROR | reliable | `u8 code` (1 version mismatch, 2 room full, 3 kicked), `str text` |
 
 - Phases: 0 lobby, 1 countdown, 2 playing, 3 result.
+- `phase_end_tick` in ROOM: in the countdown, the tick the round starts; in the result, the tick the lobby comes back; while playing, the tick the floor starts to give way (before it, nothing is touched); 0 otherwise.
 - The server answers a PING in a packet of its own right away rather than at the next tick, so that `server_ms` is read and sent at the same moment and the round trip stays symmetric.
 - `ack_input` in SNAPSHOT is the INPUT sequence number this client's player was simulated with on that tick; a predicting client replays its inputs after it.
 
@@ -69,7 +70,7 @@ unreliable messages up to the end of the packet
 - Three floors, each a hexagon of radius 8 made of 217 hexes (`SIM_TILES`), addressed with axial coordinates `(q, r)`.
 - **Canonical tile order:** q from -8 to 8, and for each q, r ascending over the tiles inside the arena. Tile 0 is `(-8, 0)` and tile 216 is `(8, 0)`. In JavaScript this is `tileOrder()`.
 - The TILES bitmap holds floor 0's 217 tiles, then floor 1's, then floor 2's, one bit per tile (1 = gone), most significant bit of each byte first: 82 bytes for 651 tiles.
-- A touched tile falls 16 ticks later (`SIM_FALL_TICKS`). TILE_EVENTS only says when a tile was touched; clients work out when it falls.
+- A touched tile falls 24 ticks later (`SIM_FALL_TICKS`). TILE_EVENTS only says when a tile was touched; clients work out when it falls.
 - Tile centres in world space: `x = 2·√3·(q + r/2)`, `z = 2·1.5·r`. Floors sit at heights 0, -12 and -24; below -33 is the slime, and reaching it means elimination.
 
 ## Reading snapshots in a browser
