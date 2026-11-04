@@ -71,7 +71,7 @@ static void step_world(predict *pr, const world *w, sim_body *me, predict_other 
             moved[n++] = b;
     }
     sim_separate(moved, n);
-    if (remember)
+    if (remember && tick >= board.armed_tick)  /* before that, standing touches nothing */
         mark(pr, me, tick);
 }
 

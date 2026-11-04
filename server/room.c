@@ -13,10 +13,16 @@
  *
  *   LOBBY --(enough players, all ready)--> COUNTDOWN --(3 s)--> PLAYING
  *     ^                                       |                    |
- *     +------(someone left or un-readied)-----+      (one left) RESULT --(5 s)--> LOBBY */
+ *     +------(someone left or un-readied)-----+      (one left) RESULT --(5 s)--> LOBBY
+ *
+ * For the first START_GRACE_TICKS of a round the floor holds (the arena's
+ * armed_tick): everybody can find their feet before tiles start to fall.
+ * The ROOM message's phase_end_tick says when, while PLAYING. Back in the
+ * lobby the board is whole again, so the countdown shows the next round's. */
 
 #define TICK_HZ SIM_TICK_HZ
 #define COUNTDOWN_TICKS (3 * TICK_HZ)
+#define START_GRACE_TICKS (2 * TICK_HZ)
 #define RESULT_TICKS (5 * TICK_HZ)
 #define COLORS 16
 
@@ -333,8 +339,9 @@ static void start_round(void)
     }
     R.round_players = n;
     R.alive = n;
+    R.arena.armed_tick = R.tick + 1 + START_GRACE_TICKS;  /* the round's first tick is the next one */
     R.tiles_dirty = 1;
-    set_phase(PHASE_PLAYING, 0);
+    set_phase(PHASE_PLAYING, R.arena.armed_tick);
     hf_log("round started with %d players", n);
 }
 
@@ -522,6 +529,8 @@ void room_tick(uint64_t now_ms)
                 R.p[i].ready = 0;
                 R.p[i].playing = 0;
             }
+            sim_arena_reset(&R.arena);
+            R.tiles_dirty = 1;
             set_phase(PHASE_LOBBY, 0);
         }
         break;

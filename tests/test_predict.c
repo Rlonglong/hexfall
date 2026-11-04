@@ -358,7 +358,7 @@ int main(void)
     CHECK(total.snapshots > 1000);
     CHECK(total.corrections <= 5 && total.max < 0.25);
     CHECK(frames_checked > 1000 && frames_on_solid == 0);
-    CHECK(largest_step < SIM_MAX_SPEED * FRAME_MS / 1000 * 1.6f);
+    CHECK(largest_step < SIM_SPRINT_SPEED * FRAME_MS / 1000 * 1.25f);
 
     /* A bad network: inputs come late or bunched up, so the server
      * sometimes has to reuse the old stick or skip inputs, and the
@@ -430,6 +430,35 @@ int main(void)
         }
     }
     CHECK(fell_on_gone == 1);
+
+    /* The floor holds at the start of a round: standing still, the tile
+     * under our bean is not drawn lit while our present is before the
+     * board is armed (the server says when), and is lit from the tick it
+     * is, as on the server. Our present is ahead of the server's, so it is
+     * lit on screen a little before the server gets there. */
+    start(60, 0, 0, 0, 1);
+    uint32_t armed = S.tick + 45;
+    S.arena.armed_tick = w.arena.armed_tick = armed;
+    const sim_tile *served = &S.arena.tiles[0][sim_tile_index(q, r)];
+    int lit_early = 0, lit_ahead = 0;
+    while (S.tick < armed - 1) {
+        run(0.001);
+        sim_tile t;
+        double at;
+        predict_tile(&pr, &w, 0, sim_tile_index(q, r), 0, &t, &at);
+        int lit = pr.active && interp_tile_state(&t, at) != TILE_SOLID;
+        lit_early += lit && pr.shown_tick < armed - 1;
+        lit_ahead += lit;
+    }
+    CHECK(pr.active && lit_early == 0 && lit_ahead > 0 && served->state == TILE_SOLID);
+    run(0.3);
+    {
+        sim_tile t;
+        double at;
+        predict_tile(&pr, &w, 0, sim_tile_index(q, r), 0, &t, &at);
+        CHECK(served->state == TILE_TOUCHED && served->touch_tick == armed);
+        CHECK(t.state == TILE_TOUCHED && t.touch_tick == armed);
+    }
 
     printf("predict: all checks passed\n");
     return 0;

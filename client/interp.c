@@ -254,6 +254,7 @@ void interp_board_at(sim_arena *out, const sim_arena *board, uint32_t tick)
             out->tiles[layer][i].state = (uint8_t)interp_tile_state(&board->tiles[layer][i], tick);
             out->tiles[layer][i].touch_tick = board->tiles[layer][i].touch_tick;
         }
+    out->armed_tick = board->armed_tick;
 }
 
 /* Where the players of snapshot a would be `ahead_ms` later, if each did

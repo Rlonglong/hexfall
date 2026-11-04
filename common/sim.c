@@ -9,6 +9,8 @@ const float SIM_LAYER_Y[SIM_LAYERS] = {0.0f, -12.0f, -24.0f};
 #define GRAVITY 40.0f
 #define JUMP_SPEED 13.0f
 #define ACCEL_GROUND 34.0f
+#define BUILD_UP 0.5f       /* per second, from SIM_MAX_SPEED to SIM_SPRINT_FROM */
+#define SPRINT_ACCEL 10.0f  /* per second, from SIM_SPRINT_FROM to SIM_SPRINT_SPEED */
 #define JUMP_COOLDOWN_TICKS 9
 #define WORLD_LIMIT 60.0f
 #define SQRT3 1.7320508f
@@ -110,7 +112,7 @@ void sim_touch(sim_arena *a, int layer, int q, int r, uint32_t tick, sim_touch_f
     if (i < 0 || layer < 0 || layer >= SIM_LAYERS)
         return;
     sim_tile *t = &a->tiles[layer][i];
-    if (t->state != TILE_SOLID)
+    if (t->state != TILE_SOLID || tick < a->armed_tick)
         return;
     t->state = TILE_TOUCHED;
     t->touch_tick = tick;
@@ -151,6 +153,22 @@ void sim_body_spawn(sim_body *b, float x, float z)
     b->facing = atan2f(-x, -z);
 }
 
+/* How fast the stick asks to go, given how fast the bean already goes its
+ * way. The velocity is all the state a sprint has, so a snapshot carries it
+ * and a prediction replays it like any other motion. `len` is the stick's
+ * tilt, 0..1, and (mx, mz) the stick. */
+static float wanted_speed(const sim_body *b, float mx, float mz, float len)
+{
+    float want = len * SIM_MAX_SPEED;
+    if (len < 0.9f)
+        return want;
+    float along = (b->vx * mx + b->vz * mz) / len;
+    if (along < want - 0.25f)
+        return want;  /* not up to speed yet, or heading somewhere else */
+    float gain = along < SIM_SPRINT_FROM ? BUILD_UP : SPRINT_ACCEL;
+    return fminf(fmaxf(along, want) + gain * DT, SIM_SPRINT_SPEED);
+}
+
 void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick, sim_touch_fn fn,
                    void *ctx)
 {
@@ -166,9 +184,10 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
      * where the bean was heading when it left the floor, whatever the
      * player (or the camera) does on the way. */
     if (b->grounded) {
-        float accel = ACCEL_GROUND * DT;
-        b->vx += clampf(mx * SIM_MAX_SPEED - b->vx, -accel, accel);
-        b->vz += clampf(mz * SIM_MAX_SPEED - b->vz, -accel, accel);
+        float accel = ACCEL_GROUND * DT, want = wanted_speed(b, mx, mz, fminf(len, 1.0f));
+        float tx = len > 0 ? mx / fminf(len, 1.0f) * want : 0, tz = len > 0 ? mz / fminf(len, 1.0f) * want : 0;
+        b->vx += clampf(tx - b->vx, -accel, accel);
+        b->vz += clampf(tz - b->vz, -accel, accel);
     }
     b->x = clampf(b->x + b->vx * DT, -WORLD_LIMIT, WORLD_LIMIT);
     b->z = clampf(b->z + b->vz * DT, -WORLD_LIMIT, WORLD_LIMIT);

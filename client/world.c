@@ -55,7 +55,9 @@ int world_alive_count(const world *w)
 
 static void apply_board(world *w, const msg_tiles *m)
 {
+    uint32_t armed = w->arena.armed_tick;  /* from the ROOM message, not the board's */
     sim_arena_reset(&w->arena);
+    w->arena.armed_tick = armed;
     int bit = 0;
     for (int layer = 0; layer < SIM_LAYERS; layer++)
         for (int i = 0; i < SIM_TILES; i++, bit++)
@@ -105,6 +107,7 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
             w->body_count = 0;  /* last round's bodies are gone */
         w->phase = m.phase;
         w->phase_end_tick = m.phase_end_tick;
+        w->arena.armed_tick = m.phase == PHASE_PLAYING ? m.phase_end_tick : 0;  /* the floor holds until then */
         w->player_count = m.count;
         for (int i = 0; i < m.count; i++) {
             world_player *wp = &w->players[i];
@@ -152,7 +155,7 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         char text[64];
         if (!hf_get_error(&p, &m))
             break;
-        snprintf(text, sizeof text, "Server: %s", m.text);
+        snprintf(text, sizeof text, "Server: %.55s", m.text);  /* what fits in a note */
         note(w, now_ms, text);
         break;
     }

@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -222,6 +223,71 @@ static void test_tiles_and_sim(void)
     }
     CHECK(b.layer == 1 && b.alive);
     CHECK(tick > SIM_FALL_TICKS);
+
+    /* The start of a round: standing still touches nothing until the arena
+     * is armed, and then the tile underfoot at once. */
+    sim_arena_reset(&a);
+    a.armed_tick = 31;
+    sim_body_spawn(&b, 0, 0);
+    int q0, r0;
+    sim_world_tile(0, 0, &q0, &r0);
+    const sim_tile *under = &a.tiles[0][sim_tile_index(q0, r0)];
+    for (tick = 1; tick <= 30; tick++) {
+        sim_body_step(&b, &idle, &a, tick, NULL, NULL);
+        sim_arena_tick(&a, tick);
+    }
+    CHECK(under->state == TILE_SOLID);
+    sim_body_step(&b, &idle, &a, tick, NULL, NULL);
+    CHECK(under->state == TILE_TOUCHED && under->touch_tick == 31);
+}
+
+static float speed_of(const sim_body *b) { return sqrtf(b->vx * b->vx + b->vz * b->vz); }
+
+/* Runs straight up the middle of the top floor (it is all tiles from
+ * z = -24 to 24) for `ticks`, then jumps if asked; returns where it lands. */
+static float run_and_jump(sim_body *b, int ticks, int jump)
+{
+    static sim_arena a;
+    sim_arena_reset(&a);
+    sim_body_spawn(b, 0, -23);
+    sim_input run = {.mz = 1};
+    uint32_t tick = 1;
+    for (; (int)tick <= ticks; tick++)
+        sim_body_step(b, &run, &a, tick, NULL, NULL);
+    if (!jump)
+        return b->z;
+    sim_input up = {.mz = 1, .jump = 1};
+    float z0 = b->z;
+    sim_body_step(b, &up, &a, tick++, NULL, NULL);
+    while (!b->grounded && b->alive)
+        sim_body_step(b, &(sim_input){0}, &a, tick++, NULL, NULL);
+    return b->z - z0;
+}
+
+static void test_sprint(void)
+{
+    sim_body b;
+    /* Running builds up for about a second, then breaks into a sprint. */
+    run_and_jump(&b, 30, 0);
+    CHECK(speed_of(&b) >= SIM_MAX_SPEED && speed_of(&b) < SIM_SPRINT_FROM);
+    run_and_jump(&b, 60, 0);
+    CHECK(fabsf(speed_of(&b) - SIM_SPRINT_SPEED) < 0.01f);
+
+    /* Turning away ends it: a quarter turn, and a third of a second later
+     * the bean runs, no longer sprints. */
+    static sim_arena a;
+    sim_arena_reset(&a);
+    sim_input right = {.mx = 1};
+    for (uint32_t tick = 100; tick < 110; tick++)
+        sim_body_step(&b, &right, &a, tick, NULL, NULL);
+    CHECK(speed_of(&b) < SIM_SPRINT_FROM);
+    CHECK(b.vx > 7.5f);
+
+    /* A jump keeps the speed it took off with: from a sprint it goes about
+     * as far as 11/8 of one from a run. */
+    float run = run_and_jump(&b, 10, 1), sprint = run_and_jump(&b, 60, 1);
+    CHECK(run > 4.5f && sprint > run * 1.3f);
+    printf("jump from a run %.1f units, from a sprint %.1f\n", run, sprint);
 }
 
 int main(void)
@@ -231,6 +297,7 @@ int main(void)
     test_garbage();
     test_clean_name();
     test_tiles_and_sim();
+    test_sprint();
     printf("protocol: all checks passed\n");
     return 0;
 }
