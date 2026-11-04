@@ -14,9 +14,12 @@
 /* Headless players. One process runs any number of them, each with its own
  * UDP socket, so it doubles as a load generator: hexfall-bot -n 100. They
  * play from what the server tells them: the board from TILES/TILE_EVENTS and
- * their own position from snapshots. */
+ * their own position from snapshots. A bot that hears nothing from the
+ * server for LOST_MS starts a new session, as the game client does, so the
+ * bots carry on when the server is restarted. */
 
 #define THINK_TICKS 6
+#define LOST_MS 4000  /* the server's timeout too */
 #define TWO_PI 6.2831853f
 
 typedef struct {
@@ -38,6 +41,8 @@ typedef struct {
     double rtt_ms;
     int have_rtt;
     int place, rounds, wins;
+    int joined;  /* welcomed at least once */
+    int lost;    /* starting over, not welcomed back yet */
     int failed;
 } bot;
 
@@ -84,6 +89,10 @@ static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, siz
     (void)len;
     switch (type) {
     case MSG_WELCOME:
+        if (b->lost)
+            hf_log("%s: back in", b->name);
+        b->joined = 1;
+        b->lost = 0;
         send_ready(b);
         break;
     case MSG_ROOM: {
@@ -190,6 +199,22 @@ static void think(bot *b)
         }
     }
     b->dir = best_dir;
+}
+
+/* A new socket and a new session. With the old token the server hands back
+ * the same player, if it still has it; a restarted server makes a new one. */
+static void reconnect(bot *b, struct pollfd *pfd, const struct sockaddr *addr, socklen_t len)
+{
+    uint64_t token = b->net.token;
+    hf_client_close(&b->net);
+    pfd->fd = -1;
+    if (hf_client_open(&b->net, addr, len, on_msg, b) == 0) {
+        hf_client_hello(&b->net, b->name, CLIENT_BOT, token);
+        pfd->fd = b->net.fd;
+    }
+    b->net.last_recv_ms = b->now_ms;  /* try again after another LOST_MS */
+    b->phase = PHASE_LOBBY;
+    b->have_self = b->have_snap = 0;
 }
 
 static void bot_tick(bot *b)
@@ -356,9 +381,18 @@ int main(int argc, char **argv)
         if (now_us >= next_tick) {
             uint64_t now_ms = now_us / 1000;
             for (int i = 0; i < count; i++) {
-                bots[i].now_ms = now_ms;
-                bot_tick(&bots[i]);
-                hf_client_flush(&bots[i].net, now_ms);
+                bot *b = &bots[i];
+                b->now_ms = now_ms;
+                if (b->joined && !b->failed && now_ms - b->net.last_recv_ms > LOST_MS) {
+                    if (!b->lost)
+                        hf_log("%s: no packets for %d s, starting over", b->name, LOST_MS / 1000);
+                    b->lost = 1;
+                    reconnect(b, &pfds[i], (struct sockaddr *)&addr, addr_len);
+                }
+                if (b->net.fd < 0)
+                    continue;
+                bot_tick(b);
+                hf_client_flush(&b->net, now_ms);
             }
             next_tick += tick_us;
             if (now_us >= next_tick)
@@ -377,6 +411,8 @@ int main(int argc, char **argv)
     /* Say goodbye so the server frees the slots right away. */
     uint64_t now_ms = hf_now_ms();
     for (int i = 0; i < count; i++) {
+        if (bots[i].net.fd < 0)
+            continue;
         msg_bye bye = {0};
         uint8_t buf[16];
         wbuf w;
