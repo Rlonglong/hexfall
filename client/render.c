@@ -122,12 +122,23 @@ typedef struct {
     uint16_t id;
     int used, was_alive;
     float face;
+    float lag_vx, lag_vz;  /* its velocity a moment ago: what it bumps into others with */
     float bump;            /* 1 the moment it bumps into someone, fading to 0 */
+    float power;           /* how hard that bump was, 0.3 (a nudge) to 1.6 (head-on, flat out) */
+    float flash;           /* glows white for a moment after a bump */
     float push_x, push_z;  /* the way it was pushed */
+    float sprint;          /* 0 running, 1 sprinting, smoothed */
+    int sprinting;
+    float dust;            /* time to the next puff under its feet */
 } bean_look;
 
 typedef struct {
-    float life, x, y, z, vx, vy, vz;
+    float x, y, z, life, size;
+    const char *word;
+} pop;
+
+typedef struct {
+    float life, x, y, z, vx, vy, vz, size;
     Color color;
 } particle;
 
@@ -146,6 +157,11 @@ static int last_phase = -1, phase_before = -1, last_count;
 static bean_look looks[LOOKS];
 static uint8_t touching[LOOKS][LOOKS];  /* two beans in contact: bumped already */
 static float shake;                     /* the camera's jolt after we bump into someone, fading */
+static float fov_kick;                  /* the lens punches wider on a bump or a sprint, fading */
+static float my_sprint;                 /* our own bean's sprint, 0..1, for the lens */
+#define POPS 8
+static pop pops[POPS];                  /* "BONK!" where we bump into someone */
+static int pop_head;
 static particle parts[PARTICLES];
 static int part_head;
 static uint8_t seen_state[SIM_LAYERS][SIM_TILES];
@@ -333,10 +349,15 @@ static Matrix at(float x, float y, float z, float sx, float sy, float sz)
     return MatrixMultiply(MatrixScale(sx, sy, sz), MatrixTranslate(x, y, z));
 }
 
+static void emit_sized(float x, float y, float z, float vx, float vy, float vz, float life, float size, Color c)
+{
+    parts[part_head] = (particle){life, x, y, z, vx, vy, vz, size, c};
+    part_head = (part_head + 1) % PARTICLES;
+}
+
 static void emit(float x, float y, float z, float vx, float vy, float vz, float life, Color c)
 {
-    parts[part_head] = (particle){life, x, y, z, vx, vy, vz, c};
-    part_head = (part_head + 1) % PARTICLES;
+    emit_sized(x, y, z, vx, vy, vz, life, 0.8f, c);
 }
 
 static void burst(float x, float y, float z, const Color *colors, int ncolors, int n, float speed)
@@ -444,9 +465,15 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     float sy = sinf(cam_yaw), cy = cosf(cam_yaw);
     cam.position = (Vector3){cam_centre.x + sy * cam_back, cam_centre.y + cam_up, cam_centre.z + cy * cam_back};
     cam.target = (Vector3){cam_centre.x - sy * cam_ahead, cam_centre.y + cam_look, cam_centre.z - cy * cam_ahead};
-    cam.fovy += ((chase ? 52.0f : 45.0f) - cam.fovy) * r;
+    /* Wider while we sprint; a bump or breaking into a sprint punches it
+     * wider still for a moment. */
+    static float lens = 45;
+    float want_lens = chase ? 52 + 8 * my_sprint : 45;
+    lens = cam_ready ? lens + (want_lens - lens) * r : want_lens;
+    fov_kick *= expf(-dt * 7);
+    cam.fovy = lens + fminf(fov_kick, 12);
     if (shake > 0) {
-        Vector3 jolt = {(rnd() - 0.5f) * 0.5f * shake, (rnd() - 0.5f) * 0.3f * shake, (rnd() - 0.5f) * 0.5f * shake};
+        Vector3 jolt = {(rnd() - 0.5f) * 0.9f * shake, (rnd() - 0.5f) * 0.5f * shake, (rnd() - 0.5f) * 0.9f * shake};
         cam.position = Vector3Add(cam.position, jolt);
         cam.target = Vector3Add(cam.target, jolt);
     }
@@ -543,16 +570,27 @@ static void draw_shadow(const world *w, const interp_view *v, const world_body *
 
 static void draw_bean(const world_body *b, const bean_look *lk, Color color, float t)
 {
-    float speed = sqrtf(b->vx * b->vx + b->vz * b->vz);
-    float lean = fminf(0.35f, speed * 0.04f);
-    float bob = b->grounded && speed > 1 ? fabsf(sinf(t * 14 + b->x)) * 0.25f : 0;
-    /* After a bump: squashed, wobbling back into shape, knocked back the way it was pushed. */
-    float wobble = lk->bump > 0 ? sinf((1 - lk->bump) * 3 * PI) * lk->bump : 0;
-    Matrix squash = MatrixScale(1 + 0.28f * wobble, 1 - 0.22f * wobble, 1 + 0.28f * wobble);
-    Matrix knock = MatrixRotate((Vector3){lk->push_z, 0, -lk->push_x}, 0.45f * lk->bump);
+    float speed = sqrtf(b->vx * b->vx + b->vz * b->vz), k = lk->sprint;
+    /* Sprinting: leaning right into it, stretched out, the feet going twice as fast. */
+    float lean = fminf(0.35f, speed * 0.04f) + 0.3f * k;
+    float bob = b->grounded && speed > 1 ? fabsf(sinf(t * (14 + 12 * k) + b->x)) * (0.25f + 0.1f * k) : 0;
+    Matrix stretch = MatrixScale(1 - 0.08f * k, 1 - 0.06f * k, 1 + 0.2f * k);
+    /* After a bump: squashed flat, wobbling back into shape, knocked back
+     * the way it was pushed, all the more the harder the bump. */
+    float hard = fminf(lk->power, 1.3f);
+    float wobble = lk->bump > 0 ? sinf((1 - lk->bump) * 3 * PI) * lk->bump * hard : 0;
+    Matrix squash = MatrixScale(1 + 0.45f * wobble, 1 - 0.35f * wobble, 1 + 0.45f * wobble);
+    Matrix knock = MatrixRotate((Vector3){lk->push_z, 0, -lk->push_x}, 0.7f * lk->bump * hard);
     Matrix root = MatrixMultiply(MatrixMultiply(MatrixRotateY(lk->face), knock), MatrixTranslate(b->x, b->y, b->z));
-    Matrix inner = MatrixMultiply(MatrixMultiply(MatrixMultiply(squash, MatrixRotateX(lean)), MatrixTranslate(0, bob, 0)), root);
+    Matrix inner = MatrixMultiply(
+        MatrixMultiply(MatrixMultiply(MatrixMultiply(squash, stretch), MatrixRotateX(lean)), MatrixTranslate(0, bob, 0)),
+        root);
+    if (lk->flash > 0)
+        set_glow((Color){(unsigned char)(140 * lk->flash), (unsigned char)(140 * lk->flash),
+                         (unsigned char)(140 * lk->flash), 255});
     draw_mesh(ball, color, MatrixMultiply(at(0, 1.25f, 0, 0.9f, 1.25f, 0.9f), inner));
+    if (lk->flash > 0)
+        set_glow(BLANK);
     for (int side = -1; side <= 1; side += 2) {
         draw_mesh(ball, WHITE, MatrixMultiply(at(0.32f * side, 1.78f, 0.7f, 0.24f, 0.24f, 0.24f), inner));
         draw_mesh(ball, PUPIL, MatrixMultiply(at(0.32f * side, 1.8f, 0.9f, 0.12f, 0.12f, 0.12f), inner));
@@ -599,7 +637,7 @@ static void draw_particles(void)
 {
     for (int i = 0; i < PARTICLES; i++)
         if (parts[i].life > 0)
-            DrawBillboard(cam, dot, (Vector3){parts[i].x, parts[i].y, parts[i].z}, 0.8f,
+            DrawBillboard(cam, dot, (Vector3){parts[i].x, parts[i].y, parts[i].z}, parts[i].size,
                           faded(parts[i].color, parts[i].life * 2));
 }
 
@@ -644,6 +682,11 @@ static void watch_beans(const world *w, const interp_view *v, float dt)
         bean_look *lk = look_for(b->id, b->facing);
         float diff = atan2f(sinf(b->facing - lk->face), cosf(b->facing - lk->face));
         lk->face += diff * fminf(1, dt * 12);
+        /* A little behind: by the frame two beans are seen to touch, the
+         * server's push may already have slowed them down. */
+        float lag = fminf(1, dt / 0.1f);
+        lk->lag_vx += (b->vx - lk->lag_vx) * lag;
+        lk->lag_vz += (b->vz - lk->lag_vz) * lag;
         /* RESULT too: the last one to fall is shown a moment after the server ends the round. */
         if (lk->was_alive && !b->alive && (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)) {
             Color colors[3] = {{217, 166, 255, 255}, SLIME, WHITE};
@@ -653,23 +696,37 @@ static void watch_beans(const world *w, const interp_view *v, float dt)
     }
 }
 
-static void bumped(bean_look *lk, float nx, float nz)
+static void bumped(bean_look *lk, float nx, float nz, float power)
 {
+    lk->power = lk->bump > 0 ? fmaxf(lk->power, power) : power;
     lk->bump = 1;
+    lk->flash = 1;
     lk->push_x = nx;
     lk->push_z = nz;
 }
 
-/* Two beans that meet bump: both squash, stars fly where they touch, and
- * if one of them is ours the camera jolts. Judged from where the beans are
- * drawn, so it happens where the player sees them touch, whichever moment
- * each one is drawn at. */
+static void ring(float x, float y, float z, int n, float speed, float life, float size, Color c)
+{
+    for (int k = 0; k < n; k++) {
+        float a = ((float)k + rnd() * 0.5f) / (float)n * 2 * PI;
+        emit_sized(x, y, z, cosf(a) * speed, 3, sinf(a) * speed, life, size, c);
+    }
+}
+
+/* Two beans that meet bump: both squash and flash, stars and a shock ring
+ * fly where they touch, and if one of them is ours the camera jolts, the
+ * lens punches and a word pops up. The faster they were going, the bigger
+ * all of it. Judged from where the beans are drawn, so it happens where
+ * the player sees them touch, whichever moment each one is drawn at. */
 static void watch_bumps(const world *w, const interp_view *v, float dt)
 {
+    static const char *const words[] = {"BONK!", "BAM!", "POW!", "BOING!"};
     const float meet = 2 * SIM_BODY_RADIUS + 0.06f, apart = 2 * SIM_BODY_RADIUS + 0.4f;
-    for (int i = 0; i < LOOKS; i++)
-        looks[i].bump = fmaxf(0, looks[i].bump - dt / 0.4f);
-    shake = fmaxf(0, shake - dt / 0.3f);
+    for (int i = 0; i < LOOKS; i++) {
+        looks[i].bump = fmaxf(0, looks[i].bump - dt / 0.5f);
+        looks[i].flash = fmaxf(0, looks[i].flash - dt / 0.12f);
+    }
+    shake = fmaxf(0, shake - dt / 0.35f);
     for (int i = 0; i < v->count; i++)
         for (int j = i + 1; j < v->count; j++) {
             const world_body *a = &v->bodies[i], *b = &v->bodies[j];
@@ -685,13 +742,72 @@ static void watch_bumps(const world *w, const interp_view *v, float dt)
                 continue;
             *contact = 1;
             float nx = d > 0 ? dx / d : 1, nz = d > 0 ? dz / d : 0;
-            bumped(la, -nx, -nz);
-            bumped(lb, nx, nz);
+            /* How fast they were closing in: a brush in passing is a nudge,
+             * running into someone standing about 1, head-on 1.6. */
+            float closing = (la->lag_vx - lb->lag_vx) * nx + (la->lag_vz - lb->lag_vz) * nz;
+            float power = clampf(0.3f + closing / 9, 0.3f, 1.6f);
+            bumped(la, -nx, -nz, power);
+            bumped(lb, nx, nz, power);
+            float cx = a->x + dx / 2, cy = (a->y + b->y) / 2 + 1.4f, cz = a->z + dz / 2;
             Color stars[3] = {WHITE, AMBER, {255, 236, 160, 255}};
-            burst(a->x + dx / 2, (a->y + b->y) / 2 + 1.4f, a->z + dz / 2, stars, 3, 14, 5);
-            if (a->id == w->me || b->id == w->me)
-                shake = 1;
+            for (int k = 0, n = 8 + (int)(18 * power); k < n; k++) {
+                float ang = rnd() * 2 * PI, sp = (0.4f + rnd()) * (4 + 3 * power);
+                emit_sized(cx, cy, cz, cosf(ang) * sp, 3 + rnd() * 6, sinf(ang) * sp, 0.5f + rnd() * 0.5f,
+                           0.8f + 0.6f * power * rnd(), stars[k % 3]);
+            }
+            ring(cx, cy - 0.8f, cz, 12 + (int)(12 * power), 6 + 5 * power, 0.3f, 0.6f + 0.5f * power, WHITE);
+            if (a->id == w->me || b->id == w->me) {
+                shake = fmaxf(shake, power);
+                fov_kick += 4 * power;
+                if (power >= 0.6f) {
+                    pops[pop_head] = (pop){cx, cy + 1.2f, cz, 0.8f, power, words[(int)(rnd() * 4) % 4]};
+                    pop_head = (pop_head + 1) % POPS;
+                }
+            }
         }
+}
+
+/* A bean that breaks into a sprint kicks up a ring of dust (and, if it is
+ * ours, the lens widens); while it sprints, dust puffs under its feet and
+ * the air streams past it. */
+static void watch_sprints(const world *w, const interp_view *v, float dt)
+{
+    const Color dust = {255, 238, 228, 255}, air = {255, 255, 255, 200};
+    my_sprint = 0;
+    for (int i = 0; i < v->count; i++) {
+        const world_body *b = &v->bodies[i];
+        if (!b->alive)
+            continue;
+        bean_look *lk = look_for(b->id, b->facing);
+        float speed = sqrtf(b->vx * b->vx + b->vz * b->vz);
+        float k = clampf((speed - SIM_SPRINT_FROM) / (SIM_SPRINT_SPEED - SIM_SPRINT_FROM), 0, 1);
+        lk->sprint += (k - lk->sprint) * fminf(1, dt * 10);
+        if (b->id == w->me)
+            my_sprint = lk->sprint;
+        if (!lk->sprinting && k > 0.6f && b->grounded) {
+            lk->sprinting = 1;
+            ring(b->x, b->y + 0.3f, b->z, 20, 8, 0.4f, 1.4f, dust);
+            if (b->id == w->me)
+                fov_kick += 5;
+        } else if (lk->sprinting && k < 0.2f) {
+            lk->sprinting = 0;
+        }
+        if (!lk->sprinting || speed < 1)
+            continue;
+        float fx = b->vx / speed, fz = b->vz / speed;
+        lk->dust -= dt;
+        if (lk->dust <= 0 && b->grounded) {
+            lk->dust = 0.05f;
+            for (int side = -1; side <= 1; side += 2)
+                emit_sized(b->x - fx * 0.7f + fz * 0.4f * (float)side, b->y + 0.2f,
+                           b->z - fz * 0.7f - fx * 0.4f * (float)side, -fx * 2 + (rnd() - 0.5f) * 2, 2 + rnd() * 2,
+                           -fz * 2 + (rnd() - 0.5f) * 2, 0.4f, 1.1f + rnd() * 0.6f, dust);
+        }
+        if (rnd() < dt * 40) {
+            float side = (rnd() - 0.5f) * 2.4f, h = 0.4f + rnd() * 2;
+            emit_sized(b->x + fz * side, b->y + h, b->z - fx * side, -fx * 3, 1, -fz * 3, 0.2f, 0.5f, air);
+        }
+    }
 }
 
 /* ================================================================ HUD */
@@ -821,6 +937,25 @@ static void draw_tags(const world *w, const interp_view *v)
         draw_tag(w, me);  /* last, on top */
 }
 
+/* The word over a bump of ours: in big, then rising and fading. */
+static void draw_pops(float dt)
+{
+    for (int i = 0; i < POPS; i++) {
+        pop *p = &pops[i];
+        if (p->life <= 0)
+            continue;
+        p->life -= dt;
+        float age = 0.8f - p->life;
+        Vector3 at3 = {p->x, p->y + age * 2, p->z};
+        if (p->life <= 0 || !in_front(at3))
+            continue;
+        Vector2 s = GetWorldToScreen(at3, cam);
+        float grow = 1 + 0.8f * clampf(1 - age * 10, 0, 1);  /* in big, settles at once */
+        float size = (34 + 26 * p->size) * grow;
+        big(p->word, s.x, s.y, size, faded(WHITE, p->life * 4), faded(SIGNAL, p->life * 4));
+    }
+}
+
 static void draw_alive(const interp_view *v)
 {
     char count[16], of[24];
@@ -888,8 +1023,10 @@ static void draw_lobby(const world *w, const render_options *opt)
         label(state, x + bw - 26 - label_width(state, 14), row + 2, 14, is_ready ? GOOD : MUTED);
     }
     char hint[64];
-    if (opt->ready)
+    if (opt->ready && ready < w->player_count)
         snprintf(hint, sizeof hint, "You are ready. Waiting for %d more.", w->player_count - ready);
+    else if (opt->ready)
+        snprintf(hint, sizeof hint, "You are ready. Waiting for more players to join.");
     else
         snprintf(hint, sizeof hint, "Press ENTER when you are ready");
     text(hint, x + 26, y + bh - 36, 17, opt->ready ? FG : AMBER);
@@ -967,6 +1104,14 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
         float since = (float)(now_ms - phase_seen_ms) / 1000.0f;
         if (phase_before == PHASE_COUNTDOWN && since < 0.8f)
             big("GO!", sw / 2, sh * 0.32f, 150 * (1 + 0.3f * clampf(1 - since * 4, 0, 1)), AMBER, AMBER_INK);
+        /* The floor holds for the first moment of a round (phase_end_tick). */
+        double now_tick = pred && pred->shown_valid ? pred->shown_tick : (double)w->tick;
+        double hold = ((double)w->phase_end_tick - now_tick) / SIM_TICK_HZ;
+        if (in_round && hold > 0) {
+            char s[48];
+            snprintf(s, sizeof s, "The floor holds for %d s", (int)ceil(hold));
+            pill(s, fmaxf(64, sh * 0.32f - 130), AMBER, AMBER_INK);  /* above GO!, clear of our tag */
+        }
         if (!in_round)
             pill("Watching - you join the next round", sh - 110, BOOTH, FG);
         else if (me && !me->alive)
@@ -1101,8 +1246,10 @@ void render_frame(const world *w, const interp *ip, const predict *pr, const net
     if (w->have_board)
         watch_tiles(w, v);
     watch_beans(w, v, dt);
-    if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)
+    if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT) {
         watch_bumps(w, v, dt);
+        watch_sprints(w, v, dt);
+    }
     step_particles(dt);
     update_camera(w, v, opt, dt, t);
 
@@ -1114,6 +1261,7 @@ void render_frame(const world *w, const interp *ip, const predict *pr, const net
 
     if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)
         draw_tags(w, v);
+    draw_pops(dt);
     draw_hud(w, v, st, opt, now_ms);
     if (st->state == NET_CONNECTED && w->welcomed)
         draw_waiting(ip, t);
