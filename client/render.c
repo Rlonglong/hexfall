@@ -130,6 +130,9 @@ typedef struct {
     float sprint;          /* 0 running, 1 sprinting, smoothed */
     int sprinting;
     float dust;            /* time to the next puff under its feet */
+    float lie;             /* 0 upright, 1 flat on its belly (a dive), smoothed */
+    int was_move, was_shoving;
+    float shove;           /* 1 the moment it shoves, fading to 0 */
 } bean_look;
 
 typedef struct {
@@ -581,9 +584,18 @@ static void draw_bean(const world_body *b, const bean_look *lk, Color color, flo
     float wobble = lk->bump > 0 ? sinf((1 - lk->bump) * 3 * PI) * lk->bump * hard : 0;
     Matrix squash = MatrixScale(1 + 0.45f * wobble, 1 - 0.35f * wobble, 1 + 0.45f * wobble);
     Matrix knock = MatrixRotate((Vector3){lk->push_z, 0, -lk->push_x}, 0.7f * lk->bump * hard);
+    /* A dive: tipped forward about its middle, flat out and face down. */
+    Matrix tip = MatrixMultiply(MatrixMultiply(MatrixTranslate(0, -0.9f, 0), MatrixRotateX(1.45f * lk->lie)),
+                                MatrixTranslate(0, 0.9f, 0));
+    /* A shove: a lunge, the mitts punching out and back. */
+    float u = 1 - lk->shove, punch = lk->shove > 0 ? (u < 0.3f ? u / 0.3f : (1 - u) / 0.7f) : 0;
+    Matrix lunge = MatrixMultiply(MatrixRotateX(0.35f * punch), MatrixTranslate(0, 0, 0.5f * punch));
     Matrix root = MatrixMultiply(MatrixMultiply(MatrixRotateY(lk->face), knock), MatrixTranslate(b->x, b->y, b->z));
     Matrix inner = MatrixMultiply(
-        MatrixMultiply(MatrixMultiply(MatrixMultiply(squash, stretch), MatrixRotateX(lean)), MatrixTranslate(0, bob, 0)),
+        MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixMultiply(squash, stretch), MatrixRotateX(lean)),
+                                                     MatrixTranslate(0, bob * (1 - lk->lie), 0)),
+                                      tip),
+                       lunge),
         root);
     if (lk->flash > 0)
         set_glow((Color){(unsigned char)(140 * lk->flash), (unsigned char)(140 * lk->flash),
@@ -594,6 +606,10 @@ static void draw_bean(const world_body *b, const bean_look *lk, Color color, flo
     for (int side = -1; side <= 1; side += 2) {
         draw_mesh(ball, WHITE, MatrixMultiply(at(0.32f * side, 1.78f, 0.7f, 0.24f, 0.24f, 0.24f), inner));
         draw_mesh(ball, PUPIL, MatrixMultiply(at(0.32f * side, 1.8f, 0.9f, 0.12f, 0.12f, 0.12f), inner));
+        if (punch > 0)  /* boxing mitts, out of nowhere, as cartoons do */
+            draw_mesh(ball, WHITE,
+                      MatrixMultiply(at(0.62f * side * (1 - 0.4f * punch), 1.15f, 0.55f + 1.1f * punch, 0.36f, 0.36f, 0.42f),
+                                     inner));
     }
 }
 
@@ -807,6 +823,70 @@ static void watch_sprints(const world *w, const interp_view *v, float dt)
             float side = (rnd() - 0.5f) * 2.4f, h = 0.4f + rnd() * 2;
             emit_sized(b->x + fz * side, b->y + h, b->z - fx * side, -fx * 3, 1, -fz * 3, 0.2f, 0.5f, air);
         }
+    }
+}
+
+/* Dives and shoves. A diving bean tips flat and the air streams past; it
+ * lands with a splash of dust and slides on its belly, and gets up just
+ * before it can move again. A shove: the mitts punch out, a fan of air
+ * flies ahead, and whoever is in front, as drawn, is knocked back with
+ * stars (and if it involves us, the camera jolts and a word pops up). */
+static void watch_moves(const world *w, const interp_view *v, float dt)
+{
+    static const char *const words[] = {"WHAM!", "SHOVE!", "OOF!"};
+    const Color dust = {255, 238, 228, 255}, air = {255, 255, 255, 200};
+    for (int i = 0; i < v->count; i++) {
+        const world_body *b = &v->bodies[i];
+        bean_look *lk = look_for(b->id, b->facing);
+        lk->shove = fmaxf(0, lk->shove - dt / 0.3f);
+        if (!b->alive) {
+            lk->lie = 0;
+            continue;
+        }
+        float speed = sqrtf(b->vx * b->vx + b->vz * b->vz);
+        float want = b->move == MOVE_DIVE ? 1 : b->move == MOVE_DOWN && b->move_ticks > 3 ? 1 : 0;
+        lk->lie += (want - lk->lie) * fminf(1, dt * (want > lk->lie ? 16 : 9));
+        if (b->move == MOVE_DIVE && lk->was_move != MOVE_DIVE) {
+            ring(b->x, b->y + 0.6f, b->z, 10, 4, 0.3f, 0.9f, air);
+            if (b->id == w->me)
+                fov_kick += 4;
+        }
+        if (b->move == MOVE_DOWN && lk->was_move == MOVE_DIVE)
+            ring(b->x, b->y + 0.3f, b->z, 22, 7, 0.4f, 1.4f, dust);  /* belly flop */
+        if (speed > 1 && b->move == MOVE_DIVE && rnd() < dt * 50) {
+            float fx = b->vx / speed, fz = b->vz / speed, side = (rnd() - 0.5f) * 1.8f;
+            emit_sized(b->x + fz * side, b->y + 0.6f + rnd() * 0.8f, b->z - fx * side, -fx * 3, 1, -fz * 3, 0.2f, 0.5f, air);
+        }
+        if (speed > 2 && b->move == MOVE_DOWN && b->grounded && rnd() < dt * 40)
+            emit_sized(b->x + (rnd() - 0.5f), b->y + 0.2f, b->z + (rnd() - 0.5f), (rnd() - 0.5f) * 2, 2 + rnd() * 2,
+                       (rnd() - 0.5f) * 2, 0.35f, 1.0f + rnd() * 0.6f, dust);
+        lk->was_move = b->move;
+
+        if (b->shoving && !lk->was_shoving) {
+            lk->shove = 1;
+            float fx = sinf(b->facing), fz = cosf(b->facing);
+            for (int k = 0; k < 11; k++) {  /* a fan of air, the width of the shove */
+                float a = ((float)k / 10 - 0.5f) * 2.4f, ax = fx * cosf(a) + fz * sinf(a), az = fz * cosf(a) - fx * sinf(a);
+                emit_sized(b->x + ax * 1.2f, b->y + 1.2f, b->z + az * 1.2f, ax * 9, 2, az * 9, 0.22f, 0.7f, air);
+            }
+            for (int j = 0; j < v->count; j++) {
+                const world_body *o = &v->bodies[j];
+                float dx = o->x - b->x, dz = o->z - b->z, d = sqrtf(dx * dx + dz * dz);
+                if (j == i || !o->alive || fabsf(o->y - b->y) > 1.6f || d > SIM_SHOVE_RANGE + 0.4f || d <= 0 ||
+                    (dx * fx + dz * fz) / d < 0.3f)
+                    continue;
+                bumped(look_for(o->id, o->facing), dx / d, dz / d, 1.3f);
+                Color stars[3] = {WHITE, AMBER, {255, 236, 160, 255}};
+                burst(o->x - dx / d * 0.8f, o->y + 1.5f, o->z - dz / d * 0.8f, stars, 3, 18, 6);
+                if (o->id == w->me || b->id == w->me) {
+                    shake = fmaxf(shake, 1.2f);
+                    fov_kick += 5;
+                    pops[pop_head] = (pop){o->x, o->y + 2.6f, o->z, 0.8f, 1.2f, words[(int)(rnd() * 3) % 3]};
+                    pop_head = (pop_head + 1) % POPS;
+                }
+            }
+        }
+        lk->was_shoving = b->shoving;
     }
 }
 
@@ -1074,6 +1154,26 @@ static void pill(const char *s, float y, Color bg, Color fg)
     text(s, ((float)GetScreenWidth() - tw) / 2, y + 7, size, fg);
 }
 
+/* What our bean can do right now: shove (it fills up again in a second)
+ * and dive (not while diving or lying down). */
+static void draw_moves(const sim_body *b, float cx, float y)
+{
+    struct {
+        const char *name;
+        float ready;  /* 0..1 */
+    } moves[2] = {
+        {"SHOVE", b->move != MOVE_NONE ? 0 : 1 - (float)b->shove_cooldown / SIM_SHOVE_COOLDOWN},
+        {"DIVE", b->move == MOVE_NONE ? 1 : 0},
+    };
+    float bw = 96, gap = 10, x = cx - bw - gap / 2;
+    for (int i = 0; i < 2; i++, x += bw + gap) {
+        int ready = moves[i].ready >= 1;
+        box(x, y, bw, 30, 6, BOOTH);
+        box(x + 4, y + 22, (bw - 8) * clampf(moves[i].ready, 0, 1), 4, 2, ready ? AMBER : MUTED);
+        label(moves[i].name, x + (bw - label_width(moves[i].name, 13)) / 2, y + 5, 13, ready ? AMBER : MUTED);
+    }
+}
+
 static void draw_hud(const world *w, const interp_view *v, const net_status *st, const render_options *opt,
                      uint64_t now_ms)
 {
@@ -1125,6 +1225,9 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
     }
     draw_feed(w, v, now_ms);
 
+    if (w->phase == PHASE_PLAYING && pred && pred->active && me && me->alive)
+        draw_moves(&pred->body, sw / 2, sh - 84);
+
     if (st->state != NET_CONNECTED || !w->welcomed) {
         const char *what = st->state == NET_RESYNCING      ? "Catching up with the server..."
                            : st->state == NET_RECONNECTING ? "Connection lost, reconnecting..."
@@ -1132,8 +1235,9 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
         pill(what, 20, SIGNAL, WHITE);
     }
 
-    const char *keys = opt->mouse_look ? "WASD move   SPACE jump   mouse turn   ESC free the mouse   C camera   ENTER ready   F1 network"
-                                       : "WASD move   SPACE jump   click to turn with the mouse   C camera   ENTER ready   F1 network";
+    const char *keys = w->phase == PHASE_LOBBY ? "ENTER ready   F1 network"
+                       : opt->mouse_look ? "WASD move   SPACE jump   LEFT CLICK shove   RIGHT CLICK dive   ESC free the mouse   C camera   F1 network"
+                                         : "WASD move   SPACE jump   F shove   SHIFT dive   click to turn with the mouse   C camera   F1 network";
     float kw = text_width(keys, 13);
     box(sw - kw - 34, sh - 40, kw + 18, 26, 4, BOOTH);
     text(keys, sw - kw - 25, sh - 34, 13, FG);
@@ -1249,6 +1353,7 @@ void render_frame(const world *w, const interp *ip, const predict *pr, const net
     if (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT) {
         watch_bumps(w, v, dt);
         watch_sprints(w, v, dt);
+        watch_moves(w, v, dt);
     }
     step_particles(dt);
     update_camera(w, v, opt, dt, t);
