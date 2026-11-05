@@ -76,8 +76,18 @@ For the first 2 s of a round the floor holds: nothing that is stepped on starts 
 ## Inputs and prediction
 
 - A client sends one INPUT per tick. Every input sample has a sequence number, and each INPUT repeats the newest four samples, so losing a packet loses no input.
-- The server queues samples and consumes exactly one per tick (`common/input_queue.c`). When none is waiting, the stick stays where it was but a jump is not repeated. When a burst arrives after a stall, it skips the oldest samples but keeps any jump.
+- The server queues samples and consumes exactly one per tick (`common/input_queue.c`). When none is waiting, the stick stays where it was but a button press (jump, dive, shove) is not repeated. When a burst arrives after a stall, it skips the oldest samples but keeps any button press.
 - Every snapshot tells the client which input sequence number its player was last simulated with (`ack_input`). The desktop client predicts its own player with the same queue rules and physics, and replays its inputs from that point when a snapshot arrives (see [CLIENT.md](CLIENT.md)).
+- **Shoves are judged at the server's present, with no rewinding.** A shove hits whoever is in front of the shover at the tick the server uses the input. Shooters usually rewind the world to what the shooter saw, because the shooter sees everybody in the past. Here the client draws the players near its own at its own present (predicted), which is exactly that tick, so there is nothing to rewind to, and a player is never shoved from a spot they had already left on their own screen. The cost is the guess: someone who turned away within the last round trip is missed, though they looked hit.
+
+## Moves
+
+- **Sprint:** running straight at full tilt for about a second goes from 8 to 11 units per second; turning, letting go or a bump ends it.
+- **Jump:** keeps the speed it took off with; the stick does nothing in the air.
+- **Dive:** throws the bean forward at 12 units per second, on the floor the way the stick points, in the air the way it faces (once per jump, the only way to change a jump in flight). It lands on its belly, slides, and lies there for 0.5 s, stick and buttons dead, while the tiles under it start to fall.
+- **Shove:** everybody within 3 units and 70 degrees either side of the way it points goes away at least 10 units per second and off their feet, so they cannot steer until they land; once a second.
+
+The snapshot carries whether a bean is diving, lying down (with the ticks left) or shoving, since predicting anybody needs it; the cooldowns are not, as only the player's own prediction needs those and it has them from its own inputs.
 
 ## Tiles
 
@@ -92,13 +102,13 @@ For the first 2 s of a round the floor holds: nothing that is stepped on starts 
 | `common/wire.h` | Big-endian readers and writers; running past a buffer sets a flag and never reads or writes out of bounds |
 | `common/protocol.[ch]` | Message definitions, encoders, decoders |
 | `common/reliable.[ch]` | The UDP reliability layer |
-| `common/sim.[ch]` | Arena and physics, shared by server and clients. The stick works on the floor only: a jump goes where the bean was heading when it left the floor. Running straight for about a second breaks into a sprint (8 to 11 units per second), so a sprinting jump goes furthest; the velocity is all the state a sprint has |
+| `common/sim.[ch]` | Arena and physics, shared by server and clients: moving, the sprint, jumps, dives and shoves (see Moves), tiles. The velocity is all the state a sprint has |
 | `common/input_queue.[ch]` | One player's inputs on the server, one per tick; shared so clients predict by the same rules |
 | `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
 | `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
 | `server/room.c` | The game: lobby, rounds, eliminations |
 | `client/net_client.[ch]` | Desktop networking core, shared by bots and the desktop client |
-| `client/bot.c` | Headless bots, also a load generator; they start a new session when the server goes quiet, so they survive a server restart |
+| `client/bot.c` | Headless bots, also a load generator. They shove whoever is close in front and dive when a jump falls short, and start a new session when the server goes quiet, so they survive a server restart |
 | `web/protocol.js` | Browser codec, byte-for-byte compatible with the C one |
 
 ## Adding the WebSocket transport

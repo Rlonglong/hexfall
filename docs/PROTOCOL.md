@@ -1,4 +1,4 @@
-# Protocol (version 1)
+# Protocol (version 2)
 
 The C implementation is in `common/protocol.[ch]` and the browser one in `web/protocol.js`. `make test` checks that they agree byte for byte: the C side writes every message type, the JavaScript side decodes them field by field, and the client-to-server messages are re-encoded in JavaScript and compared byte by byte.
 
@@ -41,7 +41,7 @@ unreliable messages up to the end of the packet
 |---|---|---|---|
 | 1 | HELLO | reliable | `u16 version`, `u8 kind` (0 desktop, 1 phone, 2 bot), `u64 resume_token` (0 for a new player, the old token to reclaim a slot), `str name` |
 | 2 | READY | reliable | `u8 ready` |
-| 3 | INPUT | unreliable | `u8 n` (at most 4, newest first), each: `u16 seq`, `i8 mx`, `i8 mz`, `u8 buttons` (bit 0: jump was pressed since the previous sample) |
+| 3 | INPUT | unreliable | `u8 n` (at most 4, newest first), each: `u16 seq`, `i8 mx`, `i8 mz`, `u8 buttons` (pressed since the previous sample: 1 jump, 2 dive, 4 shove) |
 | 4 | PING | unreliable | `u32 client_ms` |
 | 5 | BYE | reliable | `u8 reason` |
 
@@ -54,13 +54,14 @@ unreliable messages up to the end of the packet
 | 64 | WELCOME | reliable | `u64 token` (this connection's session id; send the latest one in HELLO to reclaim the player), `u16 player_id`, `u8 color`, `u8 tick_hz`, `u32 server_ms`, `u32 tick` |
 | 65 | PONG | unreliable | `u32 client_ms` (echoed), `u32 server_ms` |
 | 66 | ROOM | reliable | `u8 phase`, `u32 tick`, `u32 phase_end_tick`, `u8 n`, each player: `u16 id`, `u8 color`, `u8 flags` (1 ready, 2 alive, 4 connected), `u8 place` (1 is the winner, 0 still playing or not placed), `str name` |
-| 67 | SNAPSHOT | unreliable | `u32 tick`, `u16 ack_input`, `u8 n`, each player: `u16 id`, `i16 x, y, z, vx, vy, vz`, `u16 facing`, `u8 flags` (1 grounded, 2 alive), `u8 layer` |
+| 67 | SNAPSHOT | unreliable | `u32 tick`, `u16 ack_input`, `u8 n`, each player: `u16 id`, `i16 x, y, z, vx, vy, vz`, `u16 facing`, `u8 flags` (1 grounded, 2 alive, 4 diving, 8 lying down after a dive, 16 shoving), `u8 layer`, `u8 move_ticks` (lying down: ticks until it is back on its feet) |
 | 68 | TILES | reliable | `u32 tick`, `u8 layers`, `u8 ring`, `u16 bitmap length`, `bitmap`, `u8 n`, each tile: `u8 layer`, `i8 q`, `i8 r`, `u32 touch_tick` |
 | 69 | TILE_EVENTS | reliable | `u32 tick`, `u8 n`, each tile: `u8 layer`, `i8 q`, `i8 r` |
 | 70 | ELIMINATED | reliable | `u16 player_id`, `u8 place`, `u32 tick` |
 | 71 | ERROR | reliable | `u8 code` (1 version mismatch, 2 room full, 3 kicked), `str text` |
 
 - Phases: 0 lobby, 1 countdown, 2 playing, 3 result.
+- Version 2 added the dive and shove buttons and the snapshot's move state. The envelope carries the version, so a client of another version is turned away.
 - `phase_end_tick` in ROOM: in the countdown, the tick the round starts; in the result, the tick the lobby comes back; while playing, the tick the floor starts to give way (before it, nothing is touched); 0 otherwise.
 - The server answers a PING in a packet of its own right away rather than at the next tick, so that `server_ms` is read and sent at the same moment and the round trip stays symmetric.
 - `ack_input` in SNAPSHOT is the INPUT sequence number this client's player was simulated with on that tick; a predicting client replays its inputs after it.
