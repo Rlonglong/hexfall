@@ -96,8 +96,11 @@ static snap_player on_wire(uint16_t id, const sim_body *b)
         .id = id, .x = fixed(b->x), .y = fixed(b->y), .z = fixed(b->z),
         .vx = fixed(b->vx), .vy = fixed(b->vy), .vz = fixed(b->vz),
         .facing = (uint16_t)((uint32_t)lrintf((turns - floorf(turns)) * 65536.0f) & 0xFFFF),
-        .flags = (uint8_t)((b->grounded ? SP_GROUNDED : 0) | (b->alive ? SP_ALIVE : 0)),
+        .flags = (uint8_t)((b->grounded ? SP_GROUNDED : 0) | (b->alive ? SP_ALIVE : 0) |
+                           (b->move == MOVE_DIVE ? SP_DIVING : 0) | (b->move == MOVE_DOWN ? SP_DOWN : 0) |
+                           (b->shove_ticks > 0 ? SP_SHOVING : 0)),
         .layer = (uint8_t)b->layer,
+        .move_ticks = (uint8_t)(b->move == MOVE_DOWN ? b->move_ticks : 0),
     };
 }
 
@@ -115,6 +118,7 @@ static void server_tick(void)
     sim_body_step(&S.body, &in, &S.arena, S.tick, on_touch, NULL);
     if (S.body.alive)
         alive[n++] = &S.body;
+    sim_shoves(alive, n);
     sim_separate(alive, n);
     if (S.tick == S.push_at)
         S.body.x += 1.5f;  /* as if something we cannot know of had shoved us */
@@ -137,8 +141,8 @@ static void server_tick(void)
     }
 }
 
-/* The player: a while one way, then another, now and then standing or
- * jumping, kept near the middle of the top floor. */
+/* The player: a while one way, then another, now and then standing,
+ * jumping, diving or shoving, kept near the middle of the top floor. */
 static void choose_keys(void)
 {
     keys.buttons = 0;
@@ -154,8 +158,8 @@ static void choose_keys(void)
             keys.mz = (int8_t)lrint(-z / d * 127);
         }
     }
-    if (rnd() < 0.04)
-        keys.buttons = BTN_JUMP;
+    double r = rnd();
+    keys.buttons = r < 0.04 ? BTN_JUMP : r < 0.05 ? BTN_DIVE : r < 0.06 ? BTN_SHOVE : 0;
 }
 
 static void client_input(void)
@@ -377,7 +381,7 @@ int main(void)
     run(1);
     S.push_at = S.tick + 10;
     run(1);
-    printf("%-30s %.2f\n", "a shove of 1.5, corrected by:", pr.correction_max);
+    printf("%-30s %.2f\n", "a teleport of 1.5, corrected:", pr.correction_max);
     CHECK(pr.corrections == 1 && pr.correction_max > 1.4 && pr.correction_max < 1.6);
     CHECK(largest_step < 0.4f && fabsf(pr.shown.x - S.body.x) < 0.05f);
 
@@ -414,6 +418,67 @@ int main(void)
            (unsigned long long)pr.corrections, pr.correction_max, closest);
     CHECK(closest < 2 * SIM_BODY_RADIUS + 0.05f);
     CHECK(pr.correction_max < 0.5);
+
+    /* A dive of ours, on a perfect network: under way on screen before the
+     * server has the input, and then the server does exactly what was
+     * predicted, the flight, the slide on the belly and getting up. */
+    start(25, 0, 0, 0, 0);
+    run(0.5);
+    keys.mz = 127;
+    run(0.3);
+    uint64_t before_dive = pr.corrections;
+    float server_z = S.body.z;
+    keys.buttons = BTN_DIVE;
+    int dived_first = 0, saw_down = 0;
+    for (int i = 0; i < 1500; i++) {
+        run(0.001);
+        dived_first |= pr.shown.move == MOVE_DIVE && S.body.move == MOVE_NONE;
+        saw_down |= S.body.move == MOVE_DOWN;
+    }
+    keys.mz = 0;
+    run(0.5);
+    printf("%-30s %llu corrections; dived %.1f units\n", "a dive of ours:",
+           (unsigned long long)(pr.corrections - before_dive), S.body.z - server_z);
+    CHECK(dived_first && saw_down && S.body.move == MOVE_NONE);
+    CHECK(pr.corrections == before_dive);
+
+    /* Our shove: the player in front flies on our screen before the server
+     * has even heard of it, and lands where the server puts it. */
+    start(25, 0, 0, 0, 0);
+    add_other(0, 2.4f, 0, 0);
+    run(0.5);
+    keys.mz = 127;  /* aimed with the stick; let go once the shove is sent */
+    keys.buttons = BTN_SHOVE;
+    float other_z = S.other.z;
+    int flew_first = 0;
+    for (int i = 0; i < 1000; i++) {
+        run(0.001);
+        if (!keys.buttons)
+            keys.mz = 0;
+        flew_first |= pr.other_count == 1 && pr.shown_others[0].z > other_z + 0.3f && S.other.z == other_z;
+    }
+    printf("%-30s %.1f units, off by %.2f\n", "a shove of ours:", S.other.z - other_z,
+           fabsf(pr.others[0].body.z - S.other.z));
+    CHECK(flew_first && S.other.z > other_z + 2.5f);
+    CHECK(fabsf(pr.others[0].body.z - S.other.z) < 0.05f && fabsf(pr.others[0].body.x - S.other.x) < 0.05f);
+
+    /* Shoved by somebody else: nobody could have seen it coming, so it is
+     * corrected, smoothly, never a jump on screen. */
+    start(25, 0, 0, 0, 0);
+    add_other(0, -2.4f, 0, 0);
+    run(0.5);
+    float my_z = S.body.z;
+    S.other_in = (sim_input){.mz = 0.01f, .shove = 1};
+    uint32_t shoved_at = S.tick + 1;
+    while (S.tick < shoved_at)
+        run(0.001);
+    S.other_in = (sim_input){0};
+    largest_step = 0;
+    run(1.0);
+    printf("%-30s %.1f units, corrected by %.2f, largest step %.2f\n", "shoved by another player:",
+           S.body.z - my_z, pr.correction_max, largest_step);
+    CHECK(S.body.z > my_z + 2.5f);
+    CHECK(largest_step < 0.45f);
 
     /* Standing still until the tile gives way: the tile is drawn gone on
      * the very frame our bean starts to fall, not `delay` ms later. */

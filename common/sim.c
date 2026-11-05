@@ -11,6 +11,12 @@ const float SIM_LAYER_Y[SIM_LAYERS] = {0.0f, -12.0f, -24.0f};
 #define ACCEL_GROUND 34.0f
 #define BUILD_UP 0.5f       /* per second, from SIM_MAX_SPEED to SIM_SPRINT_FROM */
 #define SPRINT_ACCEL 10.0f  /* per second, from SIM_SPRINT_FROM to SIM_SPRINT_SPEED */
+#define DIVE_SPEED 12.0f
+#define DIVE_LIFT 5.0f       /* a dive goes up at least this fast */
+#define SLIDE_FRICTION 24.0f /* per second, on the belly: 12 slides to a stop in 0.5 s */
+#define SHOVE_PUSH 10.0f     /* a shoved body goes away at least this fast */
+#define SHOVE_LIFT 5.0f      /* and off its feet */
+#define SHOVE_CONE 0.34f     /* cos 70 degrees: how far to the side a shove reaches */
 #define JUMP_COOLDOWN_TICKS 9
 #define WORLD_LIMIT 60.0f
 #define SQRT3 1.7320508f
@@ -169,6 +175,19 @@ static float wanted_speed(const sim_body *b, float mx, float mz, float len)
     return fminf(fmaxf(along, want) + gain * DT, SIM_SPRINT_SPEED);
 }
 
+/* Where a dive or a shove goes: on the floor the way the stick points, if
+ * it does; otherwise (and always in the air) the way the bean faces. */
+static void aim(const sim_body *b, float mx, float mz, float len, float *dx, float *dz)
+{
+    if (b->grounded && len > 0.1f) {
+        *dx = mx / len;
+        *dz = mz / len;
+    } else {
+        *dx = sinf(b->facing);
+        *dz = cosf(b->facing);
+    }
+}
+
 void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick, sim_touch_fn fn,
                    void *ctx)
 {
@@ -180,14 +199,42 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         mx /= len;
         mz /= len;
     }
-    /* Only on the floor. In the air the stick does nothing: a jump goes
-     * where the bean was heading when it left the floor, whatever the
-     * player (or the camera) does on the way. */
-    if (b->grounded) {
+    if (b->shove_cooldown > 0)
+        b->shove_cooldown--;
+    if (b->shove_ticks > 0)
+        b->shove_ticks--;
+    if (b->move == MOVE_DOWN && --b->move_ticks <= 0) {
+        b->move = MOVE_NONE;  /* back on its feet */
+        b->move_ticks = 0;
+    }
+    if (in->dive && b->move == MOVE_NONE) {
+        float dx, dz;
+        aim(b, mx, mz, fminf(len, 1.0f), &dx, &dz);
+        b->vx = dx * DIVE_SPEED;
+        b->vz = dz * DIVE_SPEED;
+        b->vy = fmaxf(b->vy, DIVE_LIFT);
+        b->grounded = 0;
+        b->move = MOVE_DIVE;
+    }
+    if (in->shove && b->move == MOVE_NONE && b->shove_cooldown == 0) {
+        aim(b, mx, mz, fminf(len, 1.0f), &b->shove_x, &b->shove_z);
+        b->shove_ticks = SIM_SHOVE_SWING;
+        b->shove_cooldown = SIM_SHOVE_COOLDOWN;
+        b->facing = atan2f(b->shove_x, b->shove_z);
+    }
+    /* Only on the floor, and on its feet. In the air the stick does
+     * nothing: a jump goes where the bean was heading when it left the
+     * floor, whatever the player (or the camera) does on the way. Lying
+     * down, it slides to a stop. */
+    if (b->grounded && b->move == MOVE_NONE) {
         float accel = ACCEL_GROUND * DT, want = wanted_speed(b, mx, mz, fminf(len, 1.0f));
         float tx = len > 0 ? mx / fminf(len, 1.0f) * want : 0, tz = len > 0 ? mz / fminf(len, 1.0f) * want : 0;
         b->vx += clampf(tx - b->vx, -accel, accel);
         b->vz += clampf(tz - b->vz, -accel, accel);
+    } else if (b->grounded) {
+        float speed = sqrtf(b->vx * b->vx + b->vz * b->vz), k = speed > 0 ? fmaxf(0, speed - SLIDE_FRICTION * DT) / speed : 0;
+        b->vx *= k;
+        b->vz *= k;
     }
     b->x = clampf(b->x + b->vx * DT, -WORLD_LIMIT, WORLD_LIMIT);
     b->z = clampf(b->z + b->vz * DT, -WORLD_LIMIT, WORLD_LIMIT);
@@ -202,7 +249,7 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         } else {
             b->y = SIM_LAYER_Y[b->layer];
             sim_touch(a, b->layer, q, r, tick, fn, ctx);
-            if (in->jump && b->jump_cooldown == 0) {
+            if (in->jump && b->jump_cooldown == 0 && b->move == MOVE_NONE) {
                 b->vy = JUMP_SPEED;  /* airborne: no tiles touched until landing */
                 b->grounded = 0;
                 b->jump_cooldown = JUMP_COOLDOWN_TICKS;
@@ -222,6 +269,10 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
                     b->vy = 0;
                     b->grounded = 1;
                     b->layer = layer;
+                    if (b->move == MOVE_DIVE) {
+                        b->move = MOVE_DOWN;  /* on its belly */
+                        b->move_ticks = SIM_DOWN_TICKS;
+                    }
                     sim_touch(a, layer, q, r, tick, fn, ctx);
                     break;
                 }
@@ -232,6 +283,36 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
     }
     if (b->vx * b->vx + b->vz * b->vz > 0.25f)
         b->facing = atan2f(b->vx, b->vz);
+}
+
+/* Everybody in front of a bean that shoves this tick, close enough, goes
+ * away at least SHOVE_PUSH and off their feet, so the stick cannot fight
+ * it until they land. Bodies are only read here before they are pushed, and
+ * a push never moves anyone, so the order does not matter. */
+void sim_shoves(sim_body **bodies, int n)
+{
+    for (int i = 0; i < n; i++) {
+        const sim_body *a = bodies[i];
+        if (!a->alive || a->shove_ticks != SIM_SHOVE_SWING)
+            continue;
+        for (int j = 0; j < n; j++) {
+            sim_body *b = bodies[j];
+            if (j == i || !b->alive || fabsf(a->y - b->y) > 1.6f)
+                continue;
+            float dx = b->x - a->x, dz = b->z - a->z, d = sqrtf(dx * dx + dz * dz);
+            if (d >= SIM_SHOVE_RANGE || (d > 0 && (dx * a->shove_x + dz * a->shove_z) / d < SHOVE_CONE))
+                continue;
+            float along = b->vx * a->shove_x + b->vz * a->shove_z;
+            if (along < SHOVE_PUSH) {
+                b->vx += a->shove_x * (SHOVE_PUSH - along);
+                b->vz += a->shove_z * (SHOVE_PUSH - along);
+            }
+            if (b->grounded) {
+                b->vy = SHOVE_LIFT;
+                b->grounded = 0;
+            }
+        }
+    }
 }
 
 void sim_separate(sim_body **bodies, int n)

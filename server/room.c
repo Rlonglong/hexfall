@@ -384,6 +384,7 @@ static void play_tick(void)
         if (p->body.alive)
             bodies[n++] = &p->body;
     }
+    sim_shoves(bodies, n);
     sim_separate(bodies, n);
     sim_arena_tick(&R.arena, R.tick);
 
@@ -479,8 +480,12 @@ static void send_updates(void)
             sp->vy = to_fixed(p->body.vy);
             sp->vz = to_fixed(p->body.vz);
             sp->facing = to_turns(p->body.facing);
-            sp->flags = (uint8_t)((p->body.grounded ? SP_GROUNDED : 0) | (p->body.alive ? SP_ALIVE : 0));
-            sp->layer = (uint8_t)p->body.layer;
+            const sim_body *b = &p->body;
+            sp->flags = (uint8_t)((b->grounded ? SP_GROUNDED : 0) | (b->alive ? SP_ALIVE : 0) |
+                                  (b->move == MOVE_DIVE ? SP_DIVING : 0) | (b->move == MOVE_DOWN ? SP_DOWN : 0) |
+                                  (b->shove_ticks > 0 ? SP_SHOVING : 0));
+            sp->layer = (uint8_t)b->layer;
+            sp->move_ticks = (uint8_t)(b->move == MOVE_DOWN ? b->move_ticks : 0);
         }
     }
     wb_init(&w, buf, sizeof buf);

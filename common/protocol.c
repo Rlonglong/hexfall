@@ -277,6 +277,7 @@ void hf_put_snapshot(wbuf *w, const msg_snapshot *m)
         wb_u16(w, s->facing);
         wb_u8(w, s->flags);
         wb_u8(w, s->layer);
+        wb_u8(w, s->move_ticks);
     }
     msg_end(w, at);
 }
@@ -298,6 +299,7 @@ int hf_get_snapshot(rbuf *p, msg_snapshot *m)
         s->facing = rb_u16(p);
         s->flags = rb_u8(p);
         s->layer = rb_u8(p);
+        s->move_ticks = rb_u8(p);
     }
     return !p->error;
 }

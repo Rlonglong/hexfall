@@ -25,7 +25,7 @@ int main(int argc, char **argv)
 
     msg_input input = {.count = 2};
     input.s[0] = (input_sample){.seq = 65535, .mx = -127, .mz = 64, .buttons = BTN_JUMP};
-    input.s[1] = (input_sample){.seq = 65534, .mx = 0, .mz = -1, .buttons = 0};
+    input.s[1] = (input_sample){.seq = 65534, .mx = 0, .mz = -1, .buttons = BTN_DIVE | BTN_SHOVE};
     hf_put_input(&w, &input);
 
     msg_ping ping = {.client_ms = 4000000000u};
@@ -50,7 +50,8 @@ int main(int argc, char **argv)
 
     msg_snapshot snap = {.tick = 1001, .ack_input = 65535, .count = 1};
     snap.p[0] = (snap_player){.id = 7, .x = -1234, .y = 0, .z = 2500, .vx = 800, .vy = -1300, .vz = 0,
-                              .facing = 49152, .flags = SP_GROUNDED | SP_ALIVE, .layer = 1};
+                              .facing = 49152, .flags = SP_GROUNDED | SP_ALIVE | SP_DOWN, .layer = 1,
+                              .move_ticks = 7};
     hf_put_snapshot(&w, &snap);
 
     msg_tile_events events = {.tick = 1002, .count = 2};

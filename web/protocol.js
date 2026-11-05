@@ -5,7 +5,7 @@
 // Every multi-byte field is big-endian, which is DataView's default, and
 // 64-bit fields are BigInt. `make test` checks this file against the C encoder.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_PLAYERS = 32;
 export const NAME_MAX = 24;
 export const INPUT_REDUNDANCY = 4;
@@ -22,7 +22,8 @@ export const isReliable = (type) => !UNRELIABLE.has(type);
 export const CLIENT_KIND = Object.freeze({ DESKTOP: 0, PHONE: 1, BOT: 2 });
 export const PHASE = Object.freeze({ LOBBY: 0, COUNTDOWN: 1, PLAYING: 2, RESULT: 3 });
 export const ERROR_CODE = Object.freeze({ VERSION: 1, FULL: 2, KICKED: 3 });
-export const BTN = Object.freeze({ JUMP: 1 });
+export const BTN = Object.freeze({ JUMP: 1, DIVE: 2, SHOVE: 4 });
+export const SNAP_FLAG = Object.freeze({ GROUNDED: 1, ALIVE: 2, DIVING: 4, DOWN: 8, SHOVING: 16 });
 export const RP = Object.freeze({ READY: 1, ALIVE: 2, CONNECTED: 4 });
 export const SP = Object.freeze({ GROUNDED: 1, ALIVE: 2 });
 
@@ -190,6 +191,7 @@ export function decode(type, r) {
           facing: turns(r.u16()),
           flags: r.u8(),
           layer: r.u8(),
+          moveTicks: r.u8(),
         });
       }
       return snap;

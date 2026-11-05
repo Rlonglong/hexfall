@@ -20,14 +20,14 @@ gone[81] = 0x20;
 const expected = [
   {
     type: MSG.HELLO,
-    value: { version: 1, kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' },
+    value: { version: 2, kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' },
     encode: () => encodeHello({ kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' }),
   },
   { type: MSG.READY, value: { ready: 1 }, encode: () => encodeReady(true) },
   {
     type: MSG.INPUT,
-    value: { samples: [{ seq: 65535, mx: -127, mz: 64, buttons: 1 }, { seq: 65534, mx: 0, mz: -1, buttons: 0 }] },
-    encode: () => encodeInput([{ seq: 65535, mx: -127, mz: 64, buttons: 1 }, { seq: 65534, mx: 0, mz: -1, buttons: 0 }]),
+    value: { samples: [{ seq: 65535, mx: -127, mz: 64, buttons: 1 }, { seq: 65534, mx: 0, mz: -1, buttons: 6 }] },
+    encode: () => encodeInput([{ seq: 65535, mx: -127, mz: 64, buttons: 1 }, { seq: 65534, mx: 0, mz: -1, buttons: 6 }]),
   },
   { type: MSG.PING, value: { clientMs: 4000000000 }, encode: () => encodePing(4000000000) },
   { type: MSG.BYE, value: { reason: 0 }, encode: () => encodeBye(0) },
@@ -52,7 +52,7 @@ const expected = [
       tick: 1001, ackInput: 65535,
       players: [{
         id: 7, x: -1234 / POS_SCALE, y: 0, z: 2500 / POS_SCALE, vx: 800 / POS_SCALE, vy: -1300 / POS_SCALE, vz: 0,
-        facing: (49152 / 65536) * 2 * Math.PI, flags: 3, layer: 1,
+        facing: (49152 / 65536) * 2 * Math.PI, flags: 11, layer: 1, moveTicks: 7,
       }],
     },
   },

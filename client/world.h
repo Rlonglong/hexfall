@@ -25,6 +25,8 @@ typedef struct {
     uint16_t id;
     float x, y, z, vx, vy, vz, facing;
     int grounded, alive, layer;
+    int move, move_ticks;  /* MOVE_DIVE, or MOVE_DOWN with ticks left (sim.h) */
+    int shoving;           /* in the swing of a shove */
 } world_body;
 
 /* One SNAPSHOT, decoded. */

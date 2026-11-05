@@ -14,7 +14,7 @@
  * Only the envelope differs between the two; the messages never do.
  * docs/PROTOCOL.md lists every field; web/protocol.js is the browser twin. */
 
-#define HF_PROTOCOL_VERSION 1
+#define HF_PROTOCOL_VERSION 2  /* 2: dive and shove */
 #define HF_MAX_PACKET 1200     /* UDP payload bytes; stays under common path MTUs */
 #define HF_MAX_MSG 1100        /* largest single message, its 3-byte header included */
 #define HF_MAX_PLAYERS 32
@@ -53,9 +53,9 @@ enum hf_client_kind { CLIENT_DESKTOP = 0, CLIENT_PHONE = 1, CLIENT_BOT = 2 };
 enum hf_phase { PHASE_LOBBY = 0, PHASE_COUNTDOWN = 1, PHASE_PLAYING = 2, PHASE_RESULT = 3 };
 enum hf_error_code { ERR_VERSION = 1, ERR_FULL = 2, ERR_KICKED = 3 };
 
-enum { BTN_JUMP = 1 };                                  /* input_sample.buttons */
+enum { BTN_JUMP = 1, BTN_DIVE = 2, BTN_SHOVE = 4 };    /* input_sample.buttons */
 enum { RP_READY = 1, RP_ALIVE = 2, RP_CONNECTED = 4 };  /* room_player.flags */
-enum { SP_GROUNDED = 1, SP_ALIVE = 2 };                 /* snap_player.flags */
+enum { SP_GROUNDED = 1, SP_ALIVE = 2, SP_DIVING = 4, SP_DOWN = 8, SP_SHOVING = 16 }; /* snap_player.flags */
 
 /* 1: must arrive, in order (reliable channel). 0: newest wins, a loss is fine. */
 int hf_msg_is_reliable(uint8_t type);
@@ -76,8 +76,8 @@ typedef struct {
 
 typedef struct { uint8_t ready; } msg_ready;
 
-/* Stick axes are world-space directions, -127..127. BTN_JUMP is set in the
- * sample taken right after jump was pressed. */
+/* Stick axes are world-space directions, -127..127. A button bit is set in
+ * the sample taken right after the button was pressed. */
 typedef struct {
     uint16_t seq;
     int8_t mx, mz;
@@ -123,6 +123,7 @@ typedef struct {
     int16_t x, y, z, vx, vy, vz;  /* fixed point, HF_POS_SCALE */
     uint16_t facing;              /* 65536 = one full turn */
     uint8_t flags, layer;
+    uint8_t move_ticks;           /* SP_DOWN: ticks until it is back on its feet */
 } snap_player;
 
 typedef struct {

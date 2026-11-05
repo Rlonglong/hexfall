@@ -40,8 +40,10 @@
  * step, worked out with the keys as they are right now, so a press shows
  * on the very next frame (predict_frame).
  *
- * The jump cooldown is not in a snapshot. It comes from our own
- * prediction for input A, and the replay carries it on from there.
+ * The cooldowns (jump, shove) are not in a snapshot. They come from our
+ * own prediction for input A, and the replay carries them on from there.
+ * Whether a bean is diving or lying down is, since it changes how
+ * everybody moves.
  *
  * Bumping into others. The server pushes players apart when they meet
  * (sim_separate). For a bump to happen on screen the moment it happens,
@@ -49,8 +51,9 @@
  * have to be predicted too. So from the newest snapshot the client plays
  * the server's ticks for everybody up to our present: our inputs for us;
  * for each of the others, the stick held as they were moving (the
- * screen's default guess, interp.h; in the air nothing they press
- * matters); then everybody pushed apart, in the server's order.
+ * screen's default guess, interp.h; in the air only a dive would change
+ * anything), and no buttons; then shoves (sim_shoves), then everybody
+ * pushed apart, in the server's order.
  *
  * That gives the others two moments: the playout past (interp.h), where
  * every position is real, and our present, which is partly a guess. Far
@@ -59,6 +62,16 @@
  * between PREDICT_NEAR and PREDICT_FAR, a mix (predict_scene). When a
  * snapshot shows a guess was wrong, the change is smoothed out like our
  * own corrections.
+ *
+ * Shoves. Ours is predicted like everything else we do: the bean we shove
+ * flies on the next frame. The server judges a shove where everybody is
+ * at the tick it uses our input, which is our present, the very moment
+ * the beans near ours are drawn at; so it needs no rewinding to what we
+ * saw, and a shoved player is never pushed from a spot they had already
+ * left on their own screen. What the server and our screen can disagree
+ * on is only the guess: a bean that turned away within the last round
+ * trip is missed. A shove by someone else cannot be foreseen; it arrives
+ * in a snapshot and is smoothed out like any surprise.
  *
  * Tiles. A tile cannot be right for two moments either. Drawn at the
  * playout moment, a tile would light up `delay` ms after we step on it,
@@ -114,7 +127,8 @@ typedef struct {
     int other_count, me_slot;
 
     /* Tiles our bean has been on (at the height of the floor): the tick it
-     * first was, 0 = never; and whether it stood there, which touches it. */
+     * first was, or first stood there, 0 = never; and whether it stood
+     * there, which touches it. */
     uint32_t mine[SIM_LAYERS][SIM_TILES];
     uint8_t stood[SIM_LAYERS][SIM_TILES];
 

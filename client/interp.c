@@ -233,6 +233,9 @@ static void blend(interp_view *v, const world_snapshot *a, const world_snapshot 
         if (t >= 0.5f) {
             o->grounded = pb->grounded;
             o->layer = pb->layer;
+            o->move = pb->move;
+            o->move_ticks = pb->move_ticks;
+            o->shoving = pb->shoving;
         }
     }
 }
@@ -294,6 +297,9 @@ static void guess(interp_view *v, const interp *ip, const world_snapshot *a, dou
         o->facing = lerp_angle(before[i].facing, now[i].facing, t);
         o->grounded = now[i].grounded;
         o->layer = now[i].layer;
+        o->move = now[i].move;
+        o->move_ticks = now[i].move_ticks;
+        o->shoving = now[i].shove_ticks > 0;
         /* alive stays as the snapshot says: only the server knocks anyone out */
     }
 }

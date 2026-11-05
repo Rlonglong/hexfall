@@ -16,10 +16,11 @@
  * lost packet costs nothing; repeats and out-of-date samples are dropped
  * when they arrive. Each tick takes the oldest sample waiting:
  *
- *   - none waiting (late or lost): the stick stays where it was, a jump is
- *     not repeated, and `applied` stays as it was;
+ *   - none waiting (late or lost): the stick stays where it was, a button
+ *     press (jump, dive, shove) is not repeated, and `applied` stays as it
+ *     was;
  *   - more than INPUTQ_TARGET + 2 waiting (a burst after a stall): the
- *     oldest are dropped down to INPUTQ_TARGET, keeping any jump press,
+ *     oldest are dropped down to INPUTQ_TARGET, keeping any button press,
  *     since a longer queue only adds latency.
  *
  * `applied` goes back to the client in every snapshot as ack_input: "your

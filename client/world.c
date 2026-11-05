@@ -23,10 +23,14 @@ static world_note *note(world *w, uint64_t now_ms, const char *text)
     return n;
 }
 
+/* What a snapshot does not say (the cooldowns, where a shove went) is left
+ * at 0; a shove in its swing is not a new one. */
 sim_body world_body_to_sim(const world_body *b)
 {
     return (sim_body){.x = b->x, .y = b->y, .z = b->z, .vx = b->vx, .vy = b->vy, .vz = b->vz,
-                      .facing = b->facing, .grounded = b->grounded, .layer = b->layer, .alive = b->alive};
+                      .facing = b->facing, .grounded = b->grounded, .layer = b->layer, .alive = b->alive,
+                      .move = b->move, .move_ticks = b->move_ticks,
+                      .shove_ticks = b->shoving ? SIM_SHOVE_SWING - 1 : 0};
 }
 
 const world_player *world_player_by_id(const world *w, uint16_t id)
@@ -189,6 +193,9 @@ int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out)
         b->grounded = (s->flags & SP_GROUNDED) != 0;
         b->alive = (s->flags & SP_ALIVE) != 0;
         b->layer = s->layer;
+        b->move = s->flags & SP_DIVING ? MOVE_DIVE : s->flags & SP_DOWN ? MOVE_DOWN : MOVE_NONE;
+        b->move_ticks = b->move == MOVE_DOWN ? s->move_ticks : 0;
+        b->shoving = (s->flags & SP_SHOVING) != 0;
     }
     return 1;
 }

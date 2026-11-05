@@ -41,11 +41,29 @@ static const world_snapshot *snapshot(uint32_t tick, uint16_t id, float x)
     return &out;
 }
 
+/* A dive and a shove come through as the simulation's own state. */
+static void test_moves(void)
+{
+    static world_snapshot out;
+    msg_snapshot m = {.tick = 5, .count = 2};
+    m.p[0] = (snap_player){.id = 1, .flags = SP_ALIVE | SP_GROUNDED | SP_DOWN | SP_SHOVING, .move_ticks = 9};
+    m.p[1] = (snap_player){.id = 2, .flags = SP_ALIVE | SP_DIVING, .move_ticks = 0};
+    wbuf w;
+    wb_init(&w, buf, sizeof buf);
+    hf_put_snapshot(&w, &m);
+    CHECK(world_decode_snapshot(buf, w.len, &out));
+    CHECK(out.bodies[0].move == MOVE_DOWN && out.bodies[0].move_ticks == 9 && out.bodies[0].shoving);
+    CHECK(out.bodies[1].move == MOVE_DIVE && !out.bodies[1].shoving);
+    sim_body down = world_body_to_sim(&out.bodies[0]);
+    CHECK(down.move == MOVE_DOWN && down.move_ticks == 9 && down.shove_ticks == SIM_SHOVE_SWING - 1);
+}
+
 int main(void)
 {
     static world w;
     world_init(&w);
     wbuf wb;
+    test_moves();
 
     world_apply_event(&w, buf, welcome(7, 100), 0);
     CHECK(w.welcomed && w.me == 7 && !w.have_board);

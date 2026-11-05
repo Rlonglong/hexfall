@@ -28,12 +28,12 @@ sim_input inputq_next(inputq *iq)
 {
     if (iq->len > INPUTQ_TARGET + 2) {
         int drop = iq->len - INPUTQ_TARGET;
-        uint8_t jump = 0;
+        uint8_t pressed = 0;
         for (int i = 0; i < drop; i++)
-            jump |= iq->q[i].buttons & BTN_JUMP;
+            pressed |= iq->q[i].buttons;
         memmove(iq->q, iq->q + drop, sizeof iq->q[0] * (size_t)(iq->len - drop));
         iq->len -= drop;
-        iq->q[0].buttons |= jump;
+        iq->q[0].buttons |= pressed;
     }
     if (iq->len > 0) {
         iq->current = iq->q[0];
@@ -52,5 +52,7 @@ sim_input inputq_to_sim(const input_sample *s)
         .mx = s->mx / 127.0f,
         .mz = s->mz / 127.0f,
         .jump = (s->buttons & BTN_JUMP) != 0,
+        .dive = (s->buttons & BTN_DIVE) != 0,
+        .shove = (s->buttons & BTN_SHOVE) != 0,
     };
 }

@@ -41,8 +41,10 @@ static void mark(predict *pr, const sim_body *b, uint32_t tick)
     int i = sim_tile_index(q, r);
     if (!pr->mine[b->layer][i])
         pr->mine[b->layer][i] = tick;
-    if (b->grounded)
+    if (b->grounded && !pr->stood[b->layer][i]) {
         pr->stood[b->layer][i] = 1;
+        pr->mine[b->layer][i] = tick;  /* touched now, not when we flew low over it */
+    }
 }
 
 /* What another player is assumed to press: the stick as they were moving. */
@@ -70,6 +72,7 @@ static void step_world(predict *pr, const world *w, sim_body *me, predict_other 
         if (b->alive)
             moved[n++] = b;
     }
+    sim_shoves(moved, n);
     sim_separate(moved, n);
     if (remember && tick >= board.armed_tick)  /* before that, standing touches nothing */
         mark(pr, me, tick);
@@ -203,7 +206,11 @@ void predict_snapshot(predict *pr, const world *w)
         load_others(pr, w, before, &before_n);
         sim_body body = world_body_to_sim(b);
         const predict_step *acked = step_of(pr, w->ack_input);
-        body.jump_cooldown = acked ? acked->after.jump_cooldown : 0;
+        if (acked) {
+            body.jump_cooldown = acked->after.jump_cooldown;
+            body.shove_cooldown = acked->after.shove_cooldown;
+            body.shove_ticks = acked->after.shove_ticks;
+        }
         uint32_t tick = w->tick;
         for (uint16_t seq = (uint16_t)(w->ack_input + 1); seq != (uint16_t)(pr->seq + 1); seq++) {
             predict_step *st = step_of(pr, seq);
@@ -258,6 +265,9 @@ static void show(world_body *o, uint16_t id, const sim_body *a, const sim_body *
     o->facing = a->facing + atan2f(sinf(b->facing - a->facing), cosf(b->facing - a->facing)) * t;
     o->grounded = near->grounded;
     o->layer = near->layer;
+    o->move = near->move;
+    o->move_ticks = near->move_ticks;
+    o->shoving = near->shove_ticks > 0;
     o->alive = a->alive;
 }
 

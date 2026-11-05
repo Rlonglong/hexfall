@@ -25,7 +25,8 @@
  * off, N a worse network on purpose.
  *
  * The mouse turns the camera as in a shooter: click into the window and it
- * is held there, ESC lets it go. */
+ * is held there, ESC lets it go. Then the left button shoves and the right
+ * one dives (F and Shift do the same without the mouse). */
 
 #define BATCH 32
 #define INPUT_PERIOD (1.0 / SIM_TICK_HZ)
@@ -46,7 +47,7 @@ typedef struct {
     uint16_t seq;
     input_sample history[HF_INPUT_REDUNDANCY];  /* newest first */
     int count;
-    int jump_pressed;  /* latched between input ticks so a quick tap is never missed */
+    uint8_t pressed;   /* buttons, latched between input ticks so a quick tap is never missed */
     double carry;      /* time not yet turned into input ticks */
 } input_state;
 
@@ -72,7 +73,7 @@ static void send_ready(net_thread *net, int ready)
  * always "away from the camera". The server wants world directions, so the
  * stick is turned by the camera's angle; what it means then no longer
  * depends on the camera. */
-static input_sample read_keys(float yaw, int jump)
+static input_sample read_keys(float yaw, uint8_t pressed)
 {
     float x = 0, z = 0;  /* x: right on screen, z: toward the camera */
     if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))
@@ -92,7 +93,7 @@ static input_sample read_keys(float yaw, int jump)
     return (input_sample){
         .mx = (int8_t)lrintf(wx * 127),
         .mz = (int8_t)lrintf(wz * 127),
-        .buttons = jump ? BTN_JUMP : 0,
+        .buttons = pressed,
     };
 }
 
@@ -103,7 +104,7 @@ static input_sample send_input(net_thread *net, input_state *in, input_sample ke
     keys.seq = ++in->seq;
     memmove(&in->history[1], &in->history[0], sizeof in->history[0] * (HF_INPUT_REDUNDANCY - 1));
     in->history[0] = keys;
-    in->jump_pressed = 0;
+    in->pressed = 0;
     if (in->count < HF_INPUT_REDUNDANCY)
         in->count++;
 
@@ -118,9 +119,10 @@ static input_sample send_input(net_thread *net, input_state *in, input_sample ke
 }
 
 /* --autopilot: keys as a bot would press them, for unattended checks of
- * the prediction. A while one way, then another, now and then a jump,
- * back toward the middle when far out. */
-static input_sample autopilot(const predict *pr, int jump)
+ * the prediction. A while one way, then another, now and then a jump, a
+ * dive or a shove (latched in *pressed, as a key press is), back toward
+ * the middle when far out. */
+static input_sample autopilot(const predict *pr, uint8_t *pressed)
 {
     static int frames;
     static float x, z;
@@ -138,7 +140,10 @@ static input_sample autopilot(const predict *pr, int jump)
     return (input_sample){
         .mx = (int8_t)lrintf(x * 127),
         .mz = (int8_t)lrintf(z * 127),
-        .buttons = jump || hf_random01() < 0.01 ? BTN_JUMP : 0,
+        .buttons = *pressed |= hf_random01() < 0.01    ? BTN_JUMP
+                               : hf_random01() < 0.004 ? BTN_DIVE
+                               : hf_random01() < 0.01  ? BTN_SHOVE
+                                                       : 0,
     };
 }
 
@@ -281,9 +286,11 @@ int main(int argc, char **argv)
         /* 2. Keyboard and mouse. Inputs go out at the server's tick rate, whatever the frame rate. */
         float dt = GetFrameTime();
         if (!opt.mouse_look && IsWindowFocused() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            DisableCursor();
+            DisableCursor();  /* this click only takes the mouse; the next ones shove */
             opt.mouse_look = 1;
             ignore_mouse = 2;  /* the pointer is moved to the middle: not a turn */
+        } else if (opt.mouse_look && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            in.pressed |= BTN_SHOVE;
         } else if (opt.mouse_look && (IsKeyPressed(KEY_ESCAPE) || !IsWindowFocused())) {
             EnableCursor();
             opt.mouse_look = 0;
@@ -312,7 +319,11 @@ int main(int argc, char **argv)
             net_set_inbound(net, BAD_NETWORKS[bad_network]);
         }
         if (IsKeyPressed(KEY_SPACE))
-            in.jump_pressed = 1;
+            in.pressed |= BTN_JUMP;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) || IsKeyPressed(KEY_LEFT_SHIFT) || IsKeyPressed(KEY_RIGHT_SHIFT))
+            in.pressed |= BTN_DIVE;
+        if (IsKeyPressed(KEY_F))
+            in.pressed |= BTN_SHOVE;
         if (IsKeyPressed(KEY_F1))
             opt.show_network = !opt.show_network;
         if (IsKeyPressed(KEY_C))
@@ -330,7 +341,7 @@ int main(int argc, char **argv)
         in.carry += dt;
         if (in.carry > 0.25)
             in.carry = INPUT_PERIOD;  /* after a long stall, do not fire a burst of stale inputs */
-        input_sample keys = auto_keys ? autopilot(&pr, in.jump_pressed) : read_keys(opt.yaw, in.jump_pressed);
+        input_sample keys = auto_keys ? autopilot(&pr, &in.pressed) : read_keys(opt.yaw, in.pressed);
         while (in.carry >= INPUT_PERIOD) {
             if (st.state == NET_CONNECTED) {
                 input_sample sent = send_input(net, &in, keys);

@@ -72,14 +72,20 @@ static void test_roundtrips(void)
     msg_snapshot snap = {.tick = 123456, .ack_input = 4321, .count = HF_MAX_PLAYERS};
     for (int i = 0; i < HF_MAX_PLAYERS; i++)
         snap.p[i] = (snap_player){.id = (uint16_t)i, .x = (int16_t)(-32767 + i), .y = -2400, .z = 32767, .vx = 1,
-                                  .vy = -1, .vz = 0, .facing = 65535, .flags = SP_ALIVE, .layer = 2};
+                                  .vy = -1, .vz = 0, .facing = 65535, .flags = (uint8_t)(SP_ALIVE | (i & 1 ? SP_DOWN : SP_SHOVING)),
+                                  .layer = 2, .move_ticks = (uint8_t)(i & 1 ? i : 0)};
     wb_init(&w, buf, sizeof buf);
     hf_put_snapshot(&w, &snap);
     p = only_message(&w, MSG_SNAPSHOT);
     msg_snapshot snap2;
     CHECK(hf_get_snapshot(&p, &snap2));
     CHECK(snap2.tick == snap.tick && snap2.ack_input == snap.ack_input && snap2.count == snap.count);
-    CHECK(memcmp(snap.p, snap2.p, sizeof snap.p[0] * HF_MAX_PLAYERS) == 0);
+    for (int i = 0; i < HF_MAX_PLAYERS; i++) {  /* field by field: the struct has padding */
+        const snap_player *a = &snap.p[i], *b = &snap2.p[i];
+        CHECK(a->id == b->id && a->x == b->x && a->y == b->y && a->z == b->z && a->vx == b->vx && a->vy == b->vy &&
+              a->vz == b->vz && a->facing == b->facing && a->flags == b->flags && a->layer == b->layer &&
+              a->move_ticks == b->move_ticks);
+    }
 
     msg_tiles tiles;
     memset(&tiles, 0, sizeof tiles);
@@ -290,6 +296,82 @@ static void test_sprint(void)
     printf("jump from a run %.1f units, from a sprint %.1f\n", run, sprint);
 }
 
+static void test_dive_and_shove(void)
+{
+    static sim_arena a;
+    sim_input none = {0};
+    sim_body b;
+    uint32_t t = 1;
+
+    /* A dive from standing, the stick forward: up and away, onto the belly,
+     * a slide, half a second deaf to everything, then up again. */
+    sim_arena_reset(&a);
+    sim_body_spawn(&b, 0, -10);
+    sim_body_step(&b, &(sim_input){.mz = 1, .dive = 1}, &a, t++, NULL, NULL);
+    CHECK(b.move == MOVE_DIVE && !b.grounded && b.vz > 11);
+    while (b.move == MOVE_DIVE)
+        sim_body_step(&b, &none, &a, t++, NULL, NULL);
+    CHECK(b.move == MOVE_DOWN && b.grounded);
+    int down = 0;
+    float x0 = b.x;
+    sim_input everything = {.mx = 1, .jump = 1, .shove = 1};
+    while (b.move == MOVE_DOWN) {
+        sim_body_step(&b, &everything, &a, t++, NULL, NULL);
+        down++;
+        CHECK(b.move == MOVE_NONE || (b.grounded && b.shove_ticks == 0 && b.x == x0));  /* up again: all works */
+    }
+    CHECK(down == SIM_DOWN_TICKS);
+    float dived = b.z + 10;
+    CHECK(dived > 5 && dived < 7.5f);
+
+    /* In the air, once, the way it is going: a dive at the top of a jump
+     * from a run goes further than the jump alone. */
+    float jump = run_and_jump(&b, 10, 1);
+    sim_arena_reset(&a);
+    sim_body_spawn(&b, 0, -23);
+    for (t = 1; t <= 10; t++)
+        sim_body_step(&b, &(sim_input){.mz = 1}, &a, t, NULL, NULL);
+    float z0 = b.z;
+    sim_body_step(&b, &(sim_input){.mz = 1, .jump = 1}, &a, t++, NULL, NULL);
+    while (b.vy > 0)
+        sim_body_step(&b, &none, &a, t++, NULL, NULL);
+    sim_body_step(&b, &(sim_input){.mx = 1, .dive = 1}, &a, t++, NULL, NULL);  /* the stick does not steer it */
+    CHECK(b.move == MOVE_DIVE && fabsf(b.vx) < 0.01f && b.vz > 11);
+    float vz = b.vz;
+    sim_body_step(&b, &(sim_input){.dive = 1}, &a, t++, NULL, NULL);
+    CHECK(b.vz == vz);  /* no second dive */
+    while (!b.grounded)
+        sim_body_step(&b, &none, &a, t++, NULL, NULL);
+    printf("jump from a run %.1f units, with a dive at the top %.1f; a dive from standing %.1f\n", jump, b.z - z0,
+           dived);
+    CHECK(b.z - z0 > jump + 2);
+
+    /* A shove: the bean in front goes away and off its feet; one behind,
+     * one too far to the side and one too far away do not; once a second. */
+    sim_arena_reset(&a);
+    sim_body s, front, back, side, far;
+    sim_body_spawn(&s, 0, 0);
+    sim_body_spawn(&front, 0, 2.5f);
+    sim_body_spawn(&back, 0, -2.5f);
+    sim_body_spawn(&side, 2.5f, 0.3f);
+    sim_body_spawn(&far, 0, 3.2f);
+    sim_body *all[] = {&s, &front, &back, &side, &far};
+    for (t = 1; t <= 31; t++) {
+        sim_input in = {.mz = t == 1 ? 1 : 0, .shove = 1};
+        sim_body_step(&s, &in, &a, t, NULL, NULL);
+        for (int i = 1; i < 5; i++)
+            sim_body_step(all[i], &none, &a, t, NULL, NULL);
+        sim_shoves(all, 5);
+        if (t == 1) {
+            CHECK(front.vz >= 10 && !front.grounded);
+            CHECK(back.vz == 0 && back.grounded && side.vx == 0 && side.grounded && far.grounded);
+        } else if (t == 2) {
+            CHECK(s.shove_ticks == SIM_SHOVE_SWING - 1);  /* held down: no new shove */
+        }
+    }
+    CHECK(s.shove_ticks == SIM_SHOVE_SWING);  /* a second later, again */
+}
+
 int main(void)
 {
     test_roundtrips();
@@ -298,6 +380,7 @@ int main(void)
     test_clean_name();
     test_tiles_and_sim();
     test_sprint();
+    test_dive_and_shove();
     printf("protocol: all checks passed\n");
     return 0;
 }
