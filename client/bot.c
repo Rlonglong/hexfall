@@ -13,12 +13,14 @@
 
 /* Headless players. One process runs any number of them, each with its own
  * UDP socket, so it doubles as a load generator: hexfall-bot -n 100. They
- * play from what the server tells them: the board from TILES/TILE_EVENTS and
- * their own position from snapshots. A bot that hears nothing from the
+ * play from what the server tells them: the board from TILES/TILE_EVENTS,
+ * and where they and the others are from snapshots. They shove whoever is
+ * close in front of them, and dive when a jump is about to fall short. A bot that hears nothing from the
  * server for LOST_MS starts a new session, as the game client does, so the
  * bots carry on when the server is restarted. */
 
 #define THINK_TICKS 6
+#define SHOVE_REACH 2.6f  /* a little short of SIM_SHOVE_RANGE: the others move on meanwhile */
 #define LOST_MS 4000  /* the server's timeout too */
 #define TWO_PI 6.2831853f
 
@@ -30,8 +32,11 @@ typedef struct {
     sim_arena arena;
     int have_snap;
     uint32_t snap_tick;
-    int have_self, alive, grounded, layer;
-    float x, y, z;
+    int have_self, alive, grounded, layer, down;
+    float x, y, z, vx, vy, vz;
+    int others;
+    float other_x[HF_MAX_PLAYERS], other_z[HF_MAX_PLAYERS];  /* alive, on our floor */
+    uint64_t shoved_ms;
     float dir, noise;
     int think;
     uint16_t seq;
@@ -139,6 +144,7 @@ static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, siz
         b->have_snap = 1;
         b->snap_tick = m.tick;
         sim_arena_tick(&b->arena, m.tick);
+        b->others = 0;
         for (int i = 0; i < m.count; i++) {
             const snap_player *s = &m.p[i];
             if (s->id != cl->player_id)
@@ -147,9 +153,20 @@ static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, siz
             b->x = s->x / HF_POS_SCALE;
             b->y = s->y / HF_POS_SCALE;
             b->z = s->z / HF_POS_SCALE;
+            b->vx = s->vx / HF_POS_SCALE;
+            b->vy = s->vy / HF_POS_SCALE;
+            b->vz = s->vz / HF_POS_SCALE;
             b->layer = s->layer;
             b->alive = (s->flags & SP_ALIVE) != 0;
             b->grounded = (s->flags & SP_GROUNDED) != 0;
+            b->down = (s->flags & (SP_DIVING | SP_DOWN)) != 0;
+        }
+        for (int i = 0; i < m.count; i++) {
+            const snap_player *s = &m.p[i];
+            if (s->id != cl->player_id && (s->flags & SP_ALIVE) && fabsf(s->y / HF_POS_SCALE - b->y) < 1.6f) {
+                b->other_x[b->others] = s->x / HF_POS_SCALE;
+                b->other_z[b->others++] = s->z / HF_POS_SCALE;
+            }
         }
         break;
     }
@@ -245,6 +262,24 @@ static void bot_tick(bot *b)
             int beyond = floor_at(b, b->x + dx * 4.4f, b->z + dz * 4.4f);
             if ((ahead < 0 && beyond >= 0) || hf_random01() < 0.006)
                 buttons |= BTN_JUMP;
+        } else if (!b->down && b->vy < 0) {
+            /* Coming down short of the floor, with floor further on: dive for it. */
+            float speed = hypotf(b->vx, b->vz), fx = speed > 1 ? b->vx / speed : dx, fz = speed > 1 ? b->vz / speed : dz;
+            if (floor_at(b, b->x + fx * 1.2f, b->z + fz * 1.2f) < 0 && floor_at(b, b->x + fx * 4.5f, b->z + fz * 4.5f) >= 0)
+                buttons |= BTN_DIVE;
+        }
+        /* Somebody close in front: shove them, now and then (bots are not perfect). */
+        if (!b->down && b->now_ms - b->shoved_ms > 1000 && hf_random01() < 0.25) {
+            for (int i = 0; i < b->others; i++) {
+                float ox = b->other_x[i] - b->x, oz = b->other_z[i] - b->z, d = hypotf(ox, oz);
+                if (d > 0.1f && d < SHOVE_REACH && (ox * dx + oz * dz) / d > 0.5f) {
+                    dx = ox / d;  /* aimed with the stick */
+                    dz = oz / d;
+                    buttons |= BTN_SHOVE;
+                    b->shoved_ms = b->now_ms;
+                    break;
+                }
+            }
         }
     }
     /* Newest first; the older samples ride along so one lost packet costs nothing. */
