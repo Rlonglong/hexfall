@@ -1230,7 +1230,12 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
     if (w->phase == PHASE_PLAYING && pred && pred->active && me && me->alive)
         draw_moves(&pred->body, sw / 2, sh - 84);
 
-    if (st->state != NET_CONNECTED || !w->welcomed) {
+    if (st->server_version) {
+        char update[96];
+        snprintf(update, sizeof update, "The server runs version %u and this game version %u: please update",
+                 st->server_version, HF_PROTOCOL_VERSION);
+        pill(update, 20, SIGNAL, WHITE);
+    } else if (st->state != NET_CONNECTED || !w->welcomed) {
         const char *what = st->state == NET_RESYNCING      ? "Catching up with the server..."
                            : st->state == NET_RECONNECTING ? "Connection lost, reconnecting..."
                                                            : "Connecting...";
