@@ -51,6 +51,7 @@ typedef struct {
 
 typedef struct {
     int welcomed;
+    uint32_t sessions;  /* WELCOMEs so far: each one starts a new session */
     uint16_t me;
 
     int phase;

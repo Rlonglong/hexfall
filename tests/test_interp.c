@@ -231,6 +231,27 @@ int main(void)
     interp_frame(&ip, (uint64_t)now + 16);
     CHECK(ip.base == 5 && ip.newest == 5 && ip.view.count == 1);
 
+    /* Reconnected to a server restarted so soon that its ticks are close to
+     * the old ones: the client starts over on the new session, so nothing of
+     * the new server is taken for late, and the delay is a perfect network's. */
+    reset();
+    interp_init(&ip, INTERP_ADAPTIVE, &board);
+    play(&ip, 3, 20, 0, 0);
+    double before = ip.delay_ms;
+    interp_restart(&ip);
+    reset();
+    next_tick = FIRST - 60;  /* two seconds behind where the old server was */
+    now = 10000;
+    for (; now < 13000; now += FRAME_MS) {
+        world_snapshot r = snapshot(next_tick);
+        if ((next_tick - (FIRST - 60)) * TICK_MS <= now - 10000) {
+            interp_add(&ip, &r, (uint64_t)now);
+            next_tick++;
+        }
+        interp_frame(&ip, (uint64_t)now);
+    }
+    CHECK(ip.too_late == 0 && ip.mode == INTERP_ADAPTIVE && fabs(ip.delay_ms - before) < 10);
+
     /* Tiles, at the moment shown. */
     sim_tile t = {.state = TILE_TOUCHED, .touch_tick = 200};
     CHECK(interp_tile_state(&t, 199.6) == TILE_SOLID);

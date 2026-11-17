@@ -55,6 +55,13 @@ void interp_set_guess(interp *ip, interp_guess guess)
     restart_counters(ip);
 }
 
+void interp_restart(interp *ip)
+{
+    interp_guess guess = ip->guess;
+    interp_init(ip, ip->mode, ip->board);
+    ip->guess = guess;
+}
+
 /* Server time of a tick, in ms since `base`. */
 static double tick_ms(const interp *ip, uint32_t tick) { return (double)(int32_t)(tick - ip->base) * TICK_MS; }
 

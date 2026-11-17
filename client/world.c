@@ -94,10 +94,12 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
          * is), so start over; TILES and ROOM follow right behind. */
         world_note keep[WORLD_FEED];
         int kept = w->note_count;
+        uint32_t sessions = w->sessions;
         memcpy(keep, w->notes, sizeof keep);
         world_init(w);
         memcpy(w->notes, keep, sizeof keep);
         w->note_count = kept;
+        w->sessions = sessions + 1;
         w->welcomed = 1;
         w->me = m.player_id;
         w->tick = m.tick;

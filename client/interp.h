@@ -166,6 +166,11 @@ typedef struct {
 void interp_init(interp *ip, interp_mode mode, const sim_arena *board);
 void interp_set_mode(interp *ip, interp_mode mode);    /* keeps the history, restarts the counters */
 void interp_set_guess(interp *ip, interp_guess guess);  /* the same */
+
+/* A new session (a reconnect, perhaps to a restarted server whose ticks
+ * start again near where the old ones were): the history, the delay and
+ * the counters start over. Mode and guess stay. */
+void interp_restart(interp *ip);
 const char *interp_mode_name(interp_mode mode);
 const char *interp_guess_name(interp_guess guess);
 

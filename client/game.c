@@ -254,6 +254,7 @@ int main(int argc, char **argv)
     input_state in = {0};
     render_options opt = {.show_network = 1, .pitch = 0.55f};
     uint64_t snap_cursor = 0, used_seen = 0, start_ms = hf_now_ms();
+    uint32_t sessions_seen = 0;
     int ready_sent_in_lobby = 0, ignore_mouse = 0;
 
     while (!WindowShouldClose()) {
@@ -264,6 +265,10 @@ int main(int argc, char **argv)
         while ((got = net_events(net, batch, BATCH)) > 0)
             for (size_t i = 0; i < got; i++)
                 world_apply_event(&w, batch[i].data, batch[i].len, now_ms);
+        if (w.sessions != sessions_seen) {  /* a new session: the old timeline means nothing */
+            sessions_seen = w.sessions;
+            interp_restart(&ip);
+        }
         /* Each snapshot goes to both: the world keeps only the newest, the
          * interpolation keeps a history and also uses ones that came out of order. */
         while ((got = net_snapshots(net, &snap_cursor, batch, BATCH, NULL)) > 0)

@@ -117,6 +117,7 @@ int main(void)
      * but not what just happened. */
     world_apply_event(&w, buf, welcome(7, 300), 0);
     CHECK(w.welcomed && !w.have_board && w.body_count == 0 && w.arena.tiles[0][centre].state == TILE_SOLID);
+    CHECK(w.sessions == 2);
     CHECK(w.note_count == 1 && w.notes[0].knockout);
 
     printf("world: all checks passed\n");
