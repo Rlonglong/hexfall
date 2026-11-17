@@ -31,6 +31,7 @@ struct hf_client {
     uint64_t cookie_asked_ms;
     uint16_t player_id;
     int welcomed;
+    uint8_t server_version;  // the server speaks this other protocol version; 0 until one says so
     rel_endpoint rel;
     uint64_t last_recv_ms;
     uint64_t bytes_in, bytes_out;

@@ -416,6 +416,13 @@ void hf_put_udp_header(wbuf *w, uint64_t session, uint8_t flags)
     wb_u64(w, session);
 }
 
+int hf_udp_version(const uint8_t *pkt, size_t len)
+{
+    if (len < HF_UDP_HEADER_BYTES || ((pkt[0] << 8) | pkt[1]) != HF_UDP_MAGIC)
+        return -1;
+    return pkt[2];
+}
+
 int hf_get_udp_header(rbuf *r, uint64_t *session, uint8_t *flags)
 {
     uint16_t magic = rb_u16(r);

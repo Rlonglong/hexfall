@@ -16,7 +16,7 @@
 static conn conns[MAX_CONNS];
 static hf_cookie_key cookie_key;
 static struct {
-    uint64_t rx, tx, malformed, stale, refused, cookies;
+    uint64_t rx, tx, malformed, stale, refused, cookies, versions;
 } stats;
 
 int udp_open(uint16_t port)
@@ -201,6 +201,20 @@ static void send_cookie(int fd, const struct sockaddr_storage *to, socklen_t to_
     stats.cookies++;
 }
 
+// An envelope alone, of our version, with HF_UDP_VERSION set: what a client
+// of another version needs to tell its player to update. Only ever in answer
+// to a whole envelope, so never bigger than what came in.
+static void send_version(int fd, const struct sockaddr_storage *to, socklen_t to_len, uint64_t now_ms)
+{
+    uint8_t pkt[HF_UDP_HEADER_BYTES];
+    wbuf w;
+    wb_init(&w, pkt, sizeof pkt);
+    hf_put_udp_header(&w, 0, HF_UDP_VERSION);
+    netsim_send(fd, pkt, w.len, (const struct sockaddr *)to, to_len, now_ms);
+    stats.tx++;
+    stats.versions++;
+}
+
 static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct sockaddr_storage *from,
                             socklen_t from_len, uint64_t now_ms)
 {
@@ -209,7 +223,11 @@ static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct s
     uint8_t flags;
     rb_init(&r, buf, n);
     if (n > HF_MAX_PACKET || !hf_get_udp_header(&r, &session, &flags)) {
-        stats.malformed++;
+        int version = hf_udp_version(buf, n);
+        if (n <= HF_MAX_PACKET && version >= 0 && version != HF_PROTOCOL_VERSION)
+            send_version(fd, from, from_len, now_ms);  // ours, so that it knows to update
+        else
+            stats.malformed++;
         return;
     }
     conn *c;
@@ -342,8 +360,9 @@ void udp_stats(char *out, size_t cap)
             rtt_n++;
         }
     }
-    snprintf(out, cap, "udp conns=%d rtt=%.0fms rx=%llu tx=%llu resends=%llu bad=%llu stale=%llu cookies=%llu",
+    snprintf(out, cap,
+             "udp conns=%d rtt=%.0fms rx=%llu tx=%llu resends=%llu bad=%llu stale=%llu cookies=%llu other_version=%llu",
              n, rtt_n ? rtt / rtt_n : 0.0, (unsigned long long)stats.rx, (unsigned long long)stats.tx,
-             (unsigned long long)resends, (unsigned long long)stats.malformed,
-             (unsigned long long)stats.stale, (unsigned long long)stats.cookies);
+             (unsigned long long)resends, (unsigned long long)stats.malformed, (unsigned long long)stats.stale,
+             (unsigned long long)stats.cookies, (unsigned long long)stats.versions);
 }

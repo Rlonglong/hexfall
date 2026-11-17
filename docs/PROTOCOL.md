@@ -25,6 +25,8 @@ u16 magic 0x4846 ("HF") | u8 protocol version | u8 flags | u64 session
 
 `flags` bit 0 (`HF_UDP_COOKIE`): the session field holds an address cookie, not a session token. Every packet before WELCOME has it set; every packet after has `flags` 0 and the session token from WELCOME.
 
+`flags` bit 1 (`HF_UDP_VERSION`): "the version in this envelope is the one I speak, not yours". The first four bytes (magic, version, flags) mean the same in every version, so a server that receives a whole envelope of another version answers with an envelope alone (12 bytes, never more than it received) of its own version with this bit set. The client tells its player that the server runs another version and that the game needs updating; a bot says so and stops.
+
 followed by the reliability header (10 bytes):
 
 ```
@@ -74,7 +76,7 @@ The cookie is `u16 time slot | top 48 bits of SipHash-2-4(key, address ‖ port 
 | 71 | ERROR | reliable | `u8 code` (1 version mismatch, 2 room full, 3 kicked), `str text` |
 
 - Phases: 0 lobby, 1 countdown, 2 playing, 3 result.
-- Version 2 added the dive and shove buttons and the snapshot's move state; version 3, the address cookie. The envelope carries the version, so a client of another version is turned away.
+- Version 2 added the dive and shove buttons and the snapshot's move state; version 3, the address cookie and the version notice above. The envelope carries the version, so a client of another version is turned away, and from version 3 on it is told why.
 - `phase_end_tick` in ROOM: in the countdown, the tick the round starts; in the result, the tick the lobby comes back; while playing, the tick the floor starts to give way (before it, nothing is touched); 0 otherwise.
 - The server answers a PING in a packet of its own right away rather than at the next tick, so that `server_ms` is read and sent at the same moment and the round trip stays symmetric.
 - `ack_input` in SNAPSHOT is the INPUT sequence number this client's player was simulated with on that tick; a predicting client replays its inputs after it.

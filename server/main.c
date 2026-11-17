@@ -104,7 +104,7 @@ int main(int argc, char **argv)
         udp_maintain(now_ms);
         netsim_flush(now_ms);
         if (now_ms >= next_stats) {
-            char room[160], udp[240];
+            char room[160], udp[280];
             room_stats(room, sizeof room);
             udp_stats(udp, sizeof udp);
             hf_log("%s | %s", room, udp);

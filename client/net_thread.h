@@ -52,6 +52,7 @@ typedef struct {
     uint64_t sessions, resyncs, reconnects;     // since net_start
     uint64_t events_queued, snapshots_received, outbox_refused;
     netsim_cfg inbound;                         // disturbance applied to received packets
+    uint8_t server_version;                     // the server speaks this other protocol version; 0 if not
 } net_status;
 
 typedef struct net_thread net_thread;

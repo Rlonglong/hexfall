@@ -372,6 +372,29 @@ static void test_dive_and_shove(void)
     CHECK(s.shove_ticks == SIM_SHOVE_SWING);  // a second later, again
 }
 
+// Any two versions can read each other's first four bytes: a packet of
+// another version is recognised as such, and not taken for ours.
+static void test_envelope_versions(void)
+{
+    uint8_t pkt[HF_UDP_HEADER_BYTES];
+    wbuf w;
+    wb_init(&w, pkt, sizeof pkt);
+    hf_put_udp_header(&w, 0, HF_UDP_VERSION);
+    CHECK(hf_udp_version(pkt, sizeof pkt) == HF_PROTOCOL_VERSION);
+
+    pkt[2] = HF_PROTOCOL_VERSION + 1;  // a newer server's answer
+    CHECK(hf_udp_version(pkt, sizeof pkt) == HF_PROTOCOL_VERSION + 1);
+    rbuf r;
+    uint64_t session;
+    uint8_t flags;
+    rb_init(&r, pkt, sizeof pkt);
+    CHECK(!hf_get_udp_header(&r, &session, &flags));
+
+    CHECK(hf_udp_version(pkt, sizeof pkt - 1) == -1);  // not a whole envelope
+    pkt[0] = 'X';
+    CHECK(hf_udp_version(pkt, sizeof pkt) == -1);      // not ours at all
+}
+
 int main(void)
 {
     test_roundtrips();
@@ -381,6 +404,7 @@ int main(void)
     test_tiles_and_sim();
     test_sprint();
     test_dive_and_shove();
+    test_envelope_versions();
     printf("protocol: all checks passed\n");
     return 0;
 }

@@ -32,9 +32,16 @@
 // After WELCOME the session field holds the session token. Before it, the
 // packet has HF_UDP_COOKIE set and the field holds the address cookie the
 // server gave (cookie.h), or 0 to ask for one.
+//
+// The first four bytes (magic, version, flags) mean the same in every
+// version, so that two versions can at least tell each other apart: the
+// server answers a packet of another version with an envelope alone, of its
+// own version and with HF_UDP_VERSION set, and the client asks its player
+// to update.
 #define HF_UDP_MAGIC 0x4846u   // "HF"
 #define HF_UDP_HEADER_BYTES 12
 #define HF_UDP_COOKIE 1u       // flags: the session field is a cookie
+#define HF_UDP_VERSION 2u      // flags: "this envelope's version is the one I speak, not yours"
 
 enum hf_msg_type {
     // client -> server
@@ -215,6 +222,10 @@ int hf_get_error(rbuf *p, msg_error *m);
 
 // UDP envelope helpers.
 void hf_put_udp_header(wbuf *w, uint64_t session, uint8_t flags);
-int hf_get_udp_header(rbuf *r, uint64_t *session, uint8_t *flags);
+int hf_get_udp_header(rbuf *r, uint64_t *session, uint8_t *flags);  // 0 for another version, too
+
+// The version of a whole envelope that starts with the magic, whatever
+// version that is; -1 if it is shorter or does not.
+int hf_udp_version(const uint8_t *pkt, size_t len);
 
 #endif

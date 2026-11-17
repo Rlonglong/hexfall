@@ -103,6 +103,7 @@ static void on_message(hf_client *cl, uint8_t type, rbuf *payload, const uint8_t
     if (!hf_msg_is_reliable(type) || n->st.state == NET_RESYNCING)
         return;  // while resyncing, the main thread will get a fresh copy of everything
     if (type == MSG_WELCOME) {
+        n->st.server_version = 0;
         n->st.token = cl->token;
         n->st.player_id = cl->player_id;
         n->st.sessions++;
@@ -319,6 +320,8 @@ static void *run(void *arg)
         if (p[0].revents)
             receive(n, now_ms);
         release_held(n, now_ms);
+        if (n->client.server_version)
+            n->st.server_version = n->client.server_version;  // kept across retries until a WELCOME
         int queued = drain_outbox(n);
         run_state_machine(n, now_ms);
         queued += maybe_ping(n, now_ms);

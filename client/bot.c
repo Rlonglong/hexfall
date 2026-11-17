@@ -426,6 +426,13 @@ int main(int argc, char **argv)
                     b->lost = 1;
                     reconnect(b, &pfds[i], (struct sockaddr *)&addr, addr_len);
                 }
+                if (b->net.server_version && b->net.fd >= 0) {
+                    hf_log("%s: the server speaks protocol version %u, this bot %u: rebuild the bots", b->name,
+                           b->net.server_version, HF_PROTOCOL_VERSION);
+                    hf_client_close(&b->net);
+                    pfds[i].fd = -1;
+                    b->failed = 1;
+                }
                 if (b->net.fd < 0)
                     continue;
                 bot_tick(b);

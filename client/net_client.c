@@ -106,6 +106,11 @@ void hf_client_process(hf_client *cl, const uint8_t *buf, size_t len, uint64_t n
     rbuf r;
     uint64_t session;
     uint8_t flags;
+    int version = hf_udp_version(buf, len);
+    if (version >= 0 && version != HF_PROTOCOL_VERSION) {
+        cl->server_version = (uint8_t)version;  // nothing else will work: the player has to update
+        return;
+    }
     rb_init(&r, buf, len);
     if (!hf_get_udp_header(&r, &session, &flags))
         return;
