@@ -30,7 +30,6 @@ static void raw_send(int fd, const void *buf, size_t len, const struct sockaddr 
 }
 
 void netsim_set(netsim_cfg c) { cfg = c; }
-netsim_cfg netsim_get(void) { return cfg; }
 
 void netsim_send(int fd, const void *buf, size_t len, const struct sockaddr *to, socklen_t tolen,
                  uint64_t now_ms)

@@ -21,7 +21,6 @@ typedef struct {
 } netsim_cfg;
 
 void netsim_set(netsim_cfg cfg);
-netsim_cfg netsim_get(void);
 
 // to == NULL sends on a connected socket.
 void netsim_send(int fd, const void *buf, size_t len, const struct sockaddr *to, socklen_t tolen,

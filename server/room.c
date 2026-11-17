@@ -280,9 +280,12 @@ void room_on_message(conn *c, uint8_t type, rbuf *payload, uint64_t now_ms)
         send_to(c, &w);
         break;
     }
-    case MSG_BYE:
-        on_bye(c, p, now_ms);
+    case MSG_BYE: {
+        msg_bye m;
+        if (hf_get_bye(payload, &m))
+            on_bye(c, p, now_ms);
         break;
+    }
     default:
         break;  // server-to-client or unknown types: ignore
     }

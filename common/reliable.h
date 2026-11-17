@@ -31,7 +31,6 @@
 #define REL_WINDOW 128          // reliable messages in flight per direction
 #define REL_PACKET_HISTORY 256  // sent packets remembered so acks can be matched
 #define REL_IDS_PER_PACKET 32
-#define REL_HEADER_BYTES 10
 
 typedef void (*rel_deliver_fn)(void *ctx, const uint8_t *msg, size_t len);
 
@@ -97,7 +96,5 @@ void rel_write_packet(rel_endpoint *e, uint64_t now_ms, wbuf *w);
 // Reads a packet body and calls fn once per delivered message, reliable ones
 // in order. Returns 0 for a duplicate, stale or malformed packet.
 int rel_read_packet(rel_endpoint *e, uint64_t now_ms, rbuf *r, rel_deliver_fn fn, void *ctx);
-
-size_t rel_in_flight(const rel_endpoint *e);
 
 #endif

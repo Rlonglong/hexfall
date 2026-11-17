@@ -47,8 +47,6 @@ int rel_queue_unreliable(rel_endpoint *e, const uint8_t *msg, size_t len)
 
 void rel_drop_unreliable(rel_endpoint *e) { e->unrel_len = 0; }
 
-size_t rel_in_flight(const rel_endpoint *e) { return (uint16_t)(e->next_id - e->oldest_id); }
-
 static int is_due(const rel_endpoint *e, const rel_out *o, uint64_t now_ms)
 {
     if (!o->used || o->acked)

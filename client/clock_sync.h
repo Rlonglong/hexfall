@@ -43,6 +43,4 @@ void cs_init(clock_sync *c);
 // receive time. Returns 0 for a sample that cannot be right (a huge RTT).
 int cs_add(clock_sync *c, uint32_t t0, uint32_t ts, uint32_t t1);
 
-uint32_t cs_server_time(const clock_sync *c, uint32_t local_ms);
-
 #endif

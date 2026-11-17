@@ -71,7 +71,6 @@ enum { SP_GROUNDED = 1, SP_ALIVE = 2, SP_DIVING = 4, SP_DOWN = 8, SP_SHOVING = 1
 
 // 1: must arrive, in order (reliable channel). 0: newest wins, a loss is fine.
 int hf_msg_is_reliable(uint8_t type);
-const char *hf_msg_name(uint8_t type);
 
 // Drops control characters, keeps at most HF_NAME_MAX bytes and removes a
 // UTF-8 sequence that the cut left incomplete.

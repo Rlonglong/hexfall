@@ -15,26 +15,6 @@ int hf_msg_is_reliable(uint8_t type)
     }
 }
 
-const char *hf_msg_name(uint8_t type)
-{
-    switch (type) {
-    case MSG_HELLO: return "HELLO";
-    case MSG_READY: return "READY";
-    case MSG_INPUT: return "INPUT";
-    case MSG_PING: return "PING";
-    case MSG_BYE: return "BYE";
-    case MSG_WELCOME: return "WELCOME";
-    case MSG_PONG: return "PONG";
-    case MSG_ROOM: return "ROOM";
-    case MSG_SNAPSHOT: return "SNAPSHOT";
-    case MSG_TILES: return "TILES";
-    case MSG_TILE_EVENTS: return "TILE_EVENTS";
-    case MSG_ELIMINATED: return "ELIMINATED";
-    case MSG_ERROR: return "ERROR";
-    default: return "UNKNOWN";
-    }
-}
-
 void hf_clean_name(char *s)
 {
     size_t n = 0;

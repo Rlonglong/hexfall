@@ -16,8 +16,6 @@ export const MSG = Object.freeze({
   HELLO: 1, READY: 2, INPUT: 3, PING: 4, BYE: 5,
   WELCOME: 64, PONG: 65, ROOM: 66, SNAPSHOT: 67, TILES: 68, TILE_EVENTS: 69, ELIMINATED: 70, ERROR: 71,
 });
-const UNRELIABLE = new Set([MSG.INPUT, MSG.PING, MSG.PONG, MSG.SNAPSHOT]);
-export const isReliable = (type) => !UNRELIABLE.has(type);
 
 export const CLIENT_KIND = Object.freeze({ DESKTOP: 0, PHONE: 1, BOT: 2 });
 export const PHASE = Object.freeze({ LOBBY: 0, COUNTDOWN: 1, PLAYING: 2, RESULT: 3 });
@@ -25,7 +23,6 @@ export const ERROR_CODE = Object.freeze({ VERSION: 1, FULL: 2, KICKED: 3 });
 export const BTN = Object.freeze({ JUMP: 1, DIVE: 2, SHOVE: 4 });
 export const SNAP_FLAG = Object.freeze({ GROUNDED: 1, ALIVE: 2, DIVING: 4, DOWN: 8, SHOVING: 16 });
 export const RP = Object.freeze({ READY: 1, ALIVE: 2, CONNECTED: 4 });
-export const SP = Object.freeze({ GROUNDED: 1, ALIVE: 2 });
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

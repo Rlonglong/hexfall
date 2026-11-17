@@ -49,5 +49,3 @@ int cs_add(clock_sync *c, uint32_t t0, uint32_t ts, uint32_t t1)
     c->jitter_ms = dev / c->count;
     return 1;
 }
-
-uint32_t cs_server_time(const clock_sync *c, uint32_t local_ms) { return local_ms + c->offset; }
