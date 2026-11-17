@@ -16,7 +16,7 @@
 //     docs/PROTOCOL.md lists every field; web/protocol.js is the browser twin.
 ///////////////////////////////////////////////////////////////////////////////////
 
-#define HF_PROTOCOL_VERSION 2  // 2: dive and shove
+#define HF_PROTOCOL_VERSION 3  // 3: an address cookie before a connection is opened
 #define HF_MAX_PACKET 1200     // UDP payload bytes; stays under common path MTUs
 #define HF_MAX_MSG 1100        // largest single message, its 3-byte header included
 #define HF_MAX_PLAYERS 32
@@ -28,10 +28,13 @@
 #define HF_ERROR_TEXT_MAX 63
 #define HF_POS_SCALE 100.0f    // positions and velocities travel in 1/100 world units
 
-// UDP envelope: u16 magic, u8 protocol version, u8 flags (0), u64 session.
-// The session is 0 until the client has received WELCOME.
+// UDP envelope: u16 magic, u8 protocol version, u8 flags, u64 session.
+// After WELCOME the session field holds the session token. Before it, the
+// packet has HF_UDP_COOKIE set and the field holds the address cookie the
+// server gave (cookie.h), or 0 to ask for one.
 #define HF_UDP_MAGIC 0x4846u   // "HF"
 #define HF_UDP_HEADER_BYTES 12
+#define HF_UDP_COOKIE 1u       // flags: the session field is a cookie
 
 enum hf_msg_type {
     // client -> server
@@ -211,7 +214,7 @@ int hf_get_eliminated(rbuf *p, msg_eliminated *m);
 int hf_get_error(rbuf *p, msg_error *m);
 
 // UDP envelope helpers.
-void hf_put_udp_header(wbuf *w, uint64_t session);
-int hf_get_udp_header(rbuf *r, uint64_t *session);
+void hf_put_udp_header(wbuf *w, uint64_t session, uint8_t flags);
+int hf_get_udp_header(rbuf *r, uint64_t *session, uint8_t *flags);
 
 #endif

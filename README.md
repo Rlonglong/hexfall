@@ -71,4 +71,6 @@ Connect from another machine with `--host <address or domain>`.
 3. Allow the port through the host's firewall.
 4. Optionally, point a DNS `A` record at the public address so clients can use a name.
 
-Anything listening on a public port gets probed by scanners. The server drops malformed packets, caps every length it reads, and times out peers that never finish the handshake; `make asan` fuzzes the decoders.
+Anything listening on a public port gets probed by scanners. The server drops malformed packets, caps every length it reads, and times out peers that never finish the handshake; `make asan` fuzzes the decoders. It opens a connection only once the peer has shown it receives packets at its address (an address cookie, as TCP SYN cookies do), so a forged source address can neither turn the server into an amplifier nor fill its connection slots.
+
+What it does not protect against: packets are not encrypted, so someone who can read the traffic between a player and the server (an open Wi-Fi, say) can copy that player's session token and play as them. Session tokens (64 random bits) and cookies stop attackers who cannot see the traffic.

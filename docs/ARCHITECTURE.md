@@ -89,6 +89,13 @@ For the first 2 s of a round the floor holds: nothing that is stepped on starts 
 
 The snapshot carries whether a bean is diving, lying down (with the ticks left) or shoving, since predicting anybody needs it; the cooldowns are not, as only the player's own prediction needs those and it has them from its own inputs.
 
+## Who is who, and what an attacker can do
+
+- **Identity is the session token**, 64 random bits from the operating system (`getentropy`), fresh for every connection and checked against the ones in use. It travels in every UDP packet, so the server recognises a player whose address changes (a phone moving from Wi-Fi to mobile data, a NAT that rebinds its port). If no secure random source is available, the server refuses connections rather than make guessable tokens. Player numbers (#1, #2, …) are labels for drawing, never accepted as identification.
+- **No player learns another's address.** All traffic goes through the server, and no message carries an address.
+- **Forged source addresses get nothing.** Before a connection exists the server answers only with an address cookie, the same size as the request, and keeps no state (see PROTOCOL.md). Without the cookie a connection cannot be opened, so nobody can make the server send a stream of packets to a third party, or fill its slots, without receiving at the address they claim.
+- **Not covered: reading the traffic.** Nothing is encrypted. Someone on the path between a player and the server can copy the token and act as that player. Stopping that needs a key exchange and authenticated packets (as DTLS or QUIC do), which is out of scope here.
+
 ## Tiles
 
 - When a tile is stepped on, the server broadcasts once that this tile on this floor was touched at this tick (TILE_EVENTS).
@@ -105,6 +112,8 @@ The snapshot carries whether a bean is diving, lying down (with the ticks left) 
 | `common/sim.[ch]` | Arena and physics, shared by server and clients: moving, the sprint, jumps, dives and shoves (see Moves), tiles. The velocity is all the state a sprint has |
 | `common/input_queue.[ch]` | One player's inputs on the server, one per tick; shared so clients predict by the same rules |
 | `common/netsim.[ch]` | Fault injection: drop and delay outgoing packets |
+| `common/siphash.[ch]` | SipHash-2-4, written from the paper and checked against its test vectors |
+| `common/cookie.[ch]` | Address cookies: a connection is opened only for an address that has shown it receives packets |
 | `server/udp.c` | UDP transport: socket, connection table, handshake, timeouts |
 | `server/room.c` | The game: lobby, rounds, eliminations |
 | `client/net_client.[ch]` | Desktop networking core, shared by bots and the desktop client |

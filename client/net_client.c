@@ -11,6 +11,7 @@
 #include "util.h"
 
 #define FLUSH_MAX_PACKETS 4
+#define COOKIE_ASK_MS 250  // ask again this often until a cookie comes
 
 int hf_resolve(const char *host, const char *port, struct sockaddr_storage *out, socklen_t *len)
 {
@@ -104,11 +105,19 @@ void hf_client_process(hf_client *cl, const uint8_t *buf, size_t len, uint64_t n
 {
     rbuf r;
     uint64_t session;
+    uint8_t flags;
     rb_init(&r, buf, len);
-    if (!hf_get_udp_header(&r, &session))
+    if (!hf_get_udp_header(&r, &session, &flags))
         return;
     cl->last_recv_ms = now_ms;
     cl->bytes_in += len;
+    if (flags & HF_UDP_COOKIE) {
+        // A cookie (a new one, too, if ours had gone stale): the HELLO
+        // waiting in the reliability layer can go out with it.
+        if (!cl->welcomed && session != 0)
+            cl->cookie = session;
+        return;
+    }
     rel_read_packet(&cl->rel, now_ms, &r, deliver, cl);
 }
 
@@ -122,13 +131,31 @@ void hf_client_receive(hf_client *cl, uint64_t now_ms)
 
 void hf_client_flush(hf_client *cl, uint64_t now_ms)
 {
+    if (!cl->welcomed && !cl->cookie) {
+        // First a cookie: a bare envelope asks for one. Everything queued
+        // (the HELLO) waits for it.
+        if (!cl->cookie_asked_ms || now_ms - cl->cookie_asked_ms >= COOKIE_ASK_MS) {
+            uint8_t pkt[HF_UDP_HEADER_BYTES];
+            wbuf w;
+            wb_init(&w, pkt, sizeof pkt);
+            hf_put_udp_header(&w, 0, HF_UDP_COOKIE);
+            netsim_send(cl->fd, pkt, w.len, NULL, 0, now_ms);
+            cl->bytes_out += w.len;
+            cl->cookie_asked_ms = now_ms;
+        }
+        rel_drop_unreliable(&cl->rel);
+        return;
+    }
     for (int k = 0; k < FLUSH_MAX_PACKETS; k++) {
         if (k > 0 && !rel_wants_send(&cl->rel, now_ms))
             break;
         uint8_t pkt[HF_MAX_PACKET];
         wbuf w;
         wb_init(&w, pkt, sizeof pkt);
-        hf_put_udp_header(&w, cl->welcomed ? cl->token : 0);
+        if (cl->welcomed)
+            hf_put_udp_header(&w, cl->token, 0);
+        else
+            hf_put_udp_header(&w, cl->cookie, HF_UDP_COOKIE);
         rel_write_packet(&cl->rel, now_ms, &w);
         if (w.overflow)
             break;

@@ -5,13 +5,14 @@ CFLAGS  ?= -std=gnu11 -O2 -g -Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissin
 CPPFLAGS += -Icommon -Iclient
 LDLIBS  += -lm -lpthread
 
-COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c common/input_queue.c
+COMMON  := common/protocol.c common/reliable.c common/sim.c common/util.c common/netsim.c common/input_queue.c \
+           common/siphash.c common/cookie.c
 NETCLI  := client/net_client.c
 NETTHR  := client/net_thread.c client/msg_queue.c client/clock_sync.c $(NETCLI)
 WORLD   := client/world.c client/interp.c client/predict.c
 SERVER  := server/main.c server/udp.c server/room.c
 HEADERS := $(wildcard common/*.h server/*.h client/*.h)
-TESTS   := build/test_protocol build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/test_interp build/test_predict build/golden
+TESTS   := build/test_protocol build/test_cookie build/test_reliable build/test_msg_queue build/test_clock_sync build/test_world build/test_interp build/test_predict build/golden
 
 # The desktop client needs raylib (brew install raylib / apt install libraylib-dev);
 # everything else builds without it.
@@ -48,6 +49,7 @@ build/golden: tests/golden.c $(COMMON) $(HEADERS) | build
 # exactly what the C encoder writes.
 test: $(TESTS)
 	./build/test_protocol
+	./build/test_cookie
 	./build/test_reliable
 	./build/test_msg_queue
 	./build/test_clock_sync

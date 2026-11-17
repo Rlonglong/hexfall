@@ -1,4 +1,4 @@
-# Protocol (version 2)
+# Protocol (version 3)
 
 The C implementation is in `common/protocol.[ch]` and the browser one in `web/protocol.js`. `make test` checks that they agree byte for byte: the C side writes every message type, the JavaScript side decodes them field by field, and the client-to-server messages are re-encoded in JavaScript and compared byte by byte.
 
@@ -20,8 +20,10 @@ The same message can travel in a UDP packet or a WebSocket binary frame. A packe
 ## UDP envelope (UDP only)
 
 ```
-u16 magic 0x4846 ("HF") | u8 protocol version | u8 flags (0) | u64 session (0 until WELCOME)
+u16 magic 0x4846 ("HF") | u8 protocol version | u8 flags | u64 session
 ```
+
+`flags` bit 0 (`HF_UDP_COOKIE`): the session field holds an address cookie, not a session token. Every packet before WELCOME has it set; every packet after has `flags` 0 and the session token from WELCOME.
 
 followed by the reliability header (10 bytes):
 
@@ -34,6 +36,17 @@ unreliable messages up to the end of the packet
 - `ack` is the newest packet received; bit `i` of `ack_bits` means packet `ack - 1 - i` was received too.
 - Packets are at most 1200 bytes (`HF_MAX_PACKET`) to stay below common path MTUs and avoid IP fragmentation.
 - WebSocket connections skip this layer: TCP already guarantees delivery and order.
+
+## UDP handshake: an address cookie first
+
+A UDP source address can be forged. So the server keeps nothing for an address, and sends it no more than it received, until the address has shown that it receives packets:
+
+1. Client → server: an envelope alone, `flags` = cookie, session 0 (12 bytes).
+2. Server → client: an envelope alone, `flags` = cookie, the cookie in the session field (12 bytes). The server stores nothing.
+3. Client → server: packets with `flags` = cookie and the cookie, carrying the reliability header and HELLO. Only now, for a cookie it can verify, does the server open a connection. A missing, stale or wrong cookie gets a fresh one instead (12 bytes again), which the client then uses.
+4. Server → client: WELCOME with the session token, the board, and so on. From here on `flags` is 0 and the session field holds the token.
+
+The cookie is `u16 time slot | top 48 bits of SipHash-2-4(key, address ‖ port ‖ time slot)`, with 10 s time slots, the address as 16 bytes (IPv4 as `::ffff:a.b.c.d`), and a random 128-bit key the server makes whenever it starts. A cookie is good in its own slot and the next one, 10 to 20 s; the server works it out again rather than remembering it, as TCP SYN cookies do. A forged source address therefore gets at most one 12-byte packet per 12-byte packet sent in its name, and cannot take a connection slot. Packets with neither a cookie nor a session token are dropped without an answer.
 
 ## Client → server
 
@@ -61,7 +74,7 @@ unreliable messages up to the end of the packet
 | 71 | ERROR | reliable | `u8 code` (1 version mismatch, 2 room full, 3 kicked), `str text` |
 
 - Phases: 0 lobby, 1 countdown, 2 playing, 3 result.
-- Version 2 added the dive and shove buttons and the snapshot's move state. The envelope carries the version, so a client of another version is turned away.
+- Version 2 added the dive and shove buttons and the snapshot's move state; version 3, the address cookie. The envelope carries the version, so a client of another version is turned away.
 - `phase_end_tick` in ROOM: in the countdown, the tick the round starts; in the result, the tick the lobby comes back; while playing, the tick the floor starts to give way (before it, nothing is touched); 0 otherwise.
 - The server answers a PING in a packet of its own right away rather than at the next tick, so that `server_ms` is read and sent at the same moment and the round trip stays symmetric.
 - `ack_input` in SNAPSHOT is the INPUT sequence number this client's player was simulated with on that tick; a predicting client replays its inputs after it.

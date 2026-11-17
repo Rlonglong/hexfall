@@ -20,7 +20,7 @@ gone[81] = 0x20;
 const expected = [
   {
     type: MSG.HELLO,
-    value: { version: 2, kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' },
+    value: { version: 3, kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' },
     encode: () => encodeHello({ kind: 1, resumeToken: 0x0123456789abcdefn, name: '小明' }),
   },
   { type: MSG.READY, value: { ready: 1 }, encode: () => encodeReady(true) },

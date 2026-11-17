@@ -17,20 +17,20 @@ uint64_t hf_now_us(void)
 
 uint64_t hf_now_ms(void) { return hf_now_us() / 1000u; }
 
-uint64_t hf_random_u64(void)
-{
-    uint64_t v = 0;
-    if (getentropy(&v, sizeof v) != 0)
-        v = hf_now_us() ^ ((uint64_t)getpid() << 32);  // not secret, but unique enough
-    return v;
-}
+// Session tokens and the cookie key: guessable values there would let
+// anybody take over a player, so there is no fallback if this fails.
+int hf_random_secret(void *buf, size_t n) { return n <= 256 && getentropy(buf, n) == 0 ? 0 : -1; }
 
 static _Thread_local uint64_t rng_state;  // one generator per thread, no sharing
 
 double hf_random01(void)
 {
-    if (rng_state == 0)
-        rng_state = hf_random_u64() | 1;
+    if (rng_state == 0) {
+        uint64_t seed;
+        if (hf_random_secret(&seed, sizeof seed) != 0)
+            seed = hf_now_us() ^ ((uint64_t)getpid() << 32);  // gameplay and fault injection only: need not be secret
+        rng_state = seed | 1;
+    }
     // xorshift64*
     rng_state ^= rng_state >> 12;
     rng_state ^= rng_state << 25;

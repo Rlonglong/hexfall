@@ -11,8 +11,11 @@
 
 ///////////////////////////////////////////////////////////////////////////////////
 // The desktop side of the UDP transport: one socket, the reliability layer,
-// and the session handshake. Bots use it now; the desktop game client will
-// use the same code, and only add drawing and keyboard input.
+// and the session handshake. Bots and the desktop game client both use it.
+//
+//     The handshake: ask for an address cookie (a bare envelope), then send
+//     HELLO in packets that carry the cookie, until WELCOME brings the session
+//     token that every later packet carries (cookie.h, protocol.h).
 ///////////////////////////////////////////////////////////////////////////////////
 
 typedef struct hf_client hf_client;
@@ -23,7 +26,9 @@ typedef void (*hf_client_msg_fn)(hf_client *cl, uint8_t type, rbuf *payload, con
 
 struct hf_client {
     int fd;
-    uint64_t token;  // from WELCOME; 0 before
+    uint64_t token;   // from WELCOME; 0 before
+    uint64_t cookie;  // from the server before WELCOME; 0 until it has sent one
+    uint64_t cookie_asked_ms;
     uint16_t player_id;
     int welcomed;
     rel_endpoint rel;

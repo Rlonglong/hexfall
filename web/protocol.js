@@ -5,7 +5,7 @@
 // Every multi-byte field is big-endian, which is DataView's default, and
 // 64-bit fields are BigInt. `make test` checks this file against the C encoder.
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const MAX_PLAYERS = 32;
 export const NAME_MAX = 24;
 export const INPUT_REDUNDANCY = 4;

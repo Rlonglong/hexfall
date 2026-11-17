@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "cookie.h"
 #include "netsim.h"
 #include "server.h"
 #include "util.h"
@@ -13,12 +14,17 @@
 #define FLUSH_MAX_PACKETS 4  // per connection per tick, when there is a backlog
 
 static conn conns[MAX_CONNS];
+static hf_cookie_key cookie_key;
 static struct {
-    uint64_t rx, tx, malformed, stale, refused;
+    uint64_t rx, tx, malformed, stale, refused, cookies;
 } stats;
 
 int udp_open(uint16_t port)
 {
+    if (hf_cookie_key_init(&cookie_key) != 0) {
+        hf_log("no secure random source for the cookie key");
+        return -1;
+    }
     // Dual-stack when the OS allows it: IPv6 clients directly, IPv4 ones as
     // ::ffff:a.b.c.d mapped addresses. Falls back to plain IPv4.
     int fd = socket(AF_INET6, SOCK_DGRAM, 0);
@@ -104,8 +110,8 @@ static conn *find_by_token(uint64_t token)
     return NULL;
 }
 
-// A client that has not received WELCOME yet sends session 0, so until then
-// its packets are matched by address.
+// A client that has not received WELCOME yet sends its cookie where the
+// session goes, so until then its packets are matched by address.
 static conn *find_pending(const struct sockaddr_storage *from)
 {
     for (int i = 0; i < MAX_CONNS; i++)
@@ -122,7 +128,8 @@ static conn *conn_alloc(const struct sockaddr_storage *from, socklen_t from_len,
             continue;
         uint64_t token;
         do
-            token = hf_random_u64();
+            if (hf_random_secret(&token, sizeof token) != 0)
+                return NULL;  // no guessable tokens: no connection at all
         while (token == 0 || find_by_token(token));
         memset(c, 0, sizeof *c);
         c->used = 1;
@@ -181,18 +188,39 @@ static void deliver(void *ctx, const uint8_t *msg, size_t len)
 
 static void flush_conn(int fd, conn *c, uint64_t now_ms);
 
+// One envelope, nothing else: as many bytes back as the request had, so a
+// forged source address gets no more than it was sent.
+static void send_cookie(int fd, const struct sockaddr_storage *to, socklen_t to_len, uint64_t now_ms)
+{
+    uint8_t pkt[HF_UDP_HEADER_BYTES];
+    wbuf w;
+    wb_init(&w, pkt, sizeof pkt);
+    hf_put_udp_header(&w, hf_cookie_make(&cookie_key, (const struct sockaddr *)to, now_ms), HF_UDP_COOKIE);
+    netsim_send(fd, pkt, w.len, (const struct sockaddr *)to, to_len, now_ms);
+    stats.tx++;
+    stats.cookies++;
+}
+
 static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct sockaddr_storage *from,
                             socklen_t from_len, uint64_t now_ms)
 {
     rbuf r;
     uint64_t session;
+    uint8_t flags;
     rb_init(&r, buf, n);
-    if (n > HF_MAX_PACKET || !hf_get_udp_header(&r, &session)) {
+    if (n > HF_MAX_PACKET || !hf_get_udp_header(&r, &session, &flags)) {
         stats.malformed++;
         return;
     }
     conn *c;
-    if (session == 0) {
+    if (flags & HF_UDP_COOKIE) {
+        // Not connected yet. Nothing is kept for an address until a packet
+        // from it carries the cookie we sent there (cookie.h); without one,
+        // or with a stale one, it gets a cookie and nothing else.
+        if (!hf_cookie_check(&cookie_key, (const struct sockaddr *)from, session, now_ms)) {
+            send_cookie(fd, from, from_len, now_ms);
+            return;
+        }
         c = find_pending(from);
         if (!c) {
             c = conn_alloc(from, from_len, now_ms);
@@ -202,6 +230,9 @@ static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct s
             }
             hf_log("%s connected", conn_addr_str(c));
         }
+    } else if (session == 0) {
+        stats.malformed++;  // neither a cookie nor a session: an older client, or noise
+        return;
     } else {
         c = find_by_token(session);
         if (!c) {
@@ -254,7 +285,7 @@ static void flush_conn(int fd, conn *c, uint64_t now_ms)
         uint8_t pkt[HF_MAX_PACKET];
         wbuf w;
         wb_init(&w, pkt, sizeof pkt);
-        hf_put_udp_header(&w, c->token);
+        hf_put_udp_header(&w, c->token, 0);
         rel_write_packet(&c->rel, now_ms, &w);
         if (w.overflow)
             break;
@@ -311,8 +342,8 @@ void udp_stats(char *out, size_t cap)
             rtt_n++;
         }
     }
-    snprintf(out, cap, "udp conns=%d rtt=%.0fms rx=%llu tx=%llu resends=%llu bad=%llu stale=%llu",
+    snprintf(out, cap, "udp conns=%d rtt=%.0fms rx=%llu tx=%llu resends=%llu bad=%llu stale=%llu cookies=%llu",
              n, rtt_n ? rtt / rtt_n : 0.0, (unsigned long long)stats.rx, (unsigned long long)stats.tx,
              (unsigned long long)resends, (unsigned long long)stats.malformed,
-             (unsigned long long)stats.stale);
+             (unsigned long long)stats.stale, (unsigned long long)stats.cookies);
 }

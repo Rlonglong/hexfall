@@ -408,19 +408,19 @@ int hf_get_error(rbuf *p, msg_error *m)
 
 // ===== UDP envelope =====
 
-void hf_put_udp_header(wbuf *w, uint64_t session)
+void hf_put_udp_header(wbuf *w, uint64_t session, uint8_t flags)
 {
     wb_u16(w, HF_UDP_MAGIC);
     wb_u8(w, HF_PROTOCOL_VERSION);
-    wb_u8(w, 0);
+    wb_u8(w, flags);
     wb_u64(w, session);
 }
 
-int hf_get_udp_header(rbuf *r, uint64_t *session)
+int hf_get_udp_header(rbuf *r, uint64_t *session, uint8_t *flags)
 {
     uint16_t magic = rb_u16(r);
     uint8_t version = rb_u8(r);
-    (void)rb_u8(r);
+    *flags = rb_u8(r);
     *session = rb_u64(r);
     return !r->error && magic == HF_UDP_MAGIC && version == HF_PROTOCOL_VERSION;
 }
