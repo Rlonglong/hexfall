@@ -5,10 +5,12 @@
 #include "protocol.h"
 #include "reliable.h"
 
-/* Two endpoints talk over a simulated link that drops 30% of packets,
- * delays the rest by 20-120 ms (so they also arrive out of order) and
- * duplicates some. Every reliable message must arrive exactly once and in
- * order, in both directions. */
+///////////////////////////////////////////////////////////////////////////////////
+// Two endpoints talk over a simulated link that drops 30% of packets,
+// delays the rest by 20-120 ms (so they also arrive out of order) and
+// duplicates some. Every reliable message must arrive exactly once and in
+// order, in both directions.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -21,7 +23,7 @@
 #define LOSS 0.30
 #define DUPLICATE 0.05
 #define TICK_MS 33
-#define TO_B 1500  /* reliable messages A sends to B */
+#define TO_B 1500  // reliable messages A sends to B
 #define TO_A 400
 
 typedef struct {
@@ -37,7 +39,7 @@ typedef struct {
 } sink;
 
 static flight air[8192];
-static size_t air_top;  /* slots at or past this index are free */
+static size_t air_top;  // slots at or past this index are free
 static uint64_t rng = 88172645463325252ull;
 
 static double rnd(void)
@@ -84,7 +86,7 @@ static void deliver(void *ctx, const uint8_t *msg, size_t len)
     }
 }
 
-/* A reliable test message: ROOM type, a counter, and some filler so sizes vary. */
+// A reliable test message: ROOM type, a counter, and some filler so sizes vary.
 static size_t make_reliable(uint8_t *buf, uint32_t index)
 {
     wbuf w;

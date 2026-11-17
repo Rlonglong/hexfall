@@ -9,15 +9,17 @@
 #include "sim.h"
 #include "util.h"
 
-/* A headless stand-in for the game's main thread. It starts any number of
- * network threads, one per probe, and drives each the way the game will:
- * drain events and snapshots every frame, send READY in the lobby and an
- * INPUT every tick.
- *
- * With --stall it stops draining for a while once each round is under way,
- * as if the window were being dragged, so the event queue fills up and the
- * resync path runs. It checks what it receives and exits non-zero when
- * something is wrong, which makes it the stress test for net_thread.c. */
+///////////////////////////////////////////////////////////////////////////////////
+// A headless stand-in for the game's main thread. It starts any number of
+// network threads, one per probe, and drives each the way the game will:
+// drain events and snapshots every frame, send READY in the lobby and an
+// INPUT every tick.
+//
+//     With --stall it stops draining for a while once each round is under way,
+//     as if the window were being dragged, so the event queue fills up and the
+//     resync path runs. It checks what it receives and exits non-zero when
+//     something is wrong, which makes it the stress test for net_thread.c.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define FRAME_US 16667
 #define BATCH 32
@@ -30,7 +32,7 @@ typedef struct {
     uint64_t next_input_us;
     uint64_t snap_cursor, snapshots, skipped;
     uint64_t events, welcomes, order_errors, missing_board;
-    int awaiting_board;  /* after WELCOME, TILES must come before any TILE_EVENTS */
+    int awaiting_board;  // after WELCOME, TILES must come before any TILE_EVENTS
     int have_tick;
     uint32_t last_event_tick;
     uint64_t stall_from_ms, stall_until_ms, stalls;
@@ -79,7 +81,7 @@ static void handle_event(probe *p, const mq_item *it, uint16_t me, int stall_for
     switch (type) {
     case MSG_WELCOME:
         p->welcomes++;
-        p->awaiting_board = 1;  /* a new session: forget the old view entirely */
+        p->awaiting_board = 1;  // a new session: forget the old view entirely
         p->have_tick = 0;
         break;
     case MSG_TILES: {
@@ -135,7 +137,7 @@ static void frame(probe *p, int stall_for_ms, uint64_t now_us)
     if (now_ms >= p->stall_from_ms && now_ms < p->stall_until_ms) {
         if (now_ms - p->stall_from_ms < 20)
             p->stalls++;
-        return;  /* frozen: drains nothing, sends nothing */
+        return;  // frozen: drains nothing, sends nothing
     }
     net_status st;
     net_get_status(p->net, &st);
@@ -175,7 +177,7 @@ static int summarize(probe *probes, int count, int final)
         missing += p->missing_board;
         problems += p->errors;
         if (st.clock_valid) {
-            int32_t off = (int32_t)st.clock_offset;  /* same machine: should be about 0 */
+            int32_t off = (int32_t)st.clock_offset;  // same machine: should be about 0
             off_min = clock_valid ? (off < off_min ? off : off_min) : off;
             off_max = clock_valid ? (off > off_max ? off : off_max) : off;
             clock_valid++;

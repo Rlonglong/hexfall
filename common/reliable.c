@@ -8,8 +8,8 @@
 #define RTO_MAX_MS 1000.0
 #define FLAG_HAS_ACK 1
 
-/* Sequence numbers wrap at 65536; a - b as a signed 16-bit value says which
- * one is newer as long as they are less than half the range apart. */
+// Sequence numbers wrap at 65536; a - b as a signed 16-bit value says which
+// one is newer as long as they are less than half the range apart.
 static int16_t seq_diff(uint16_t a, uint16_t b) { return (int16_t)(uint16_t)(a - b); }
 
 void rel_init(rel_endpoint *e)
@@ -85,7 +85,7 @@ void rel_write_packet(rel_endpoint *e, uint64_t now_ms, wbuf *w)
     s->sent_ms = now_ms;
     s->n_ids = 0;
 
-    /* Oldest first, so a backlog drains in order; skip what does not fit. */
+    // Oldest first, so a backlog drains in order; skip what does not fit.
     for (uint16_t id = e->oldest_id; id != e->next_id && s->n_ids < REL_IDS_PER_PACKET; id++) {
         rel_out *o = &e->out[id % REL_WINDOW];
         if (!is_due(e, o, now_ms) || w->cap - w->len < (size_t)o->len + 2)
@@ -100,8 +100,8 @@ void rel_write_packet(rel_endpoint *e, uint64_t now_ms, wbuf *w)
     }
     w->buf[count_at] = s->n_ids;
 
-    /* Unreliable messages in order while they fit; the caller may write
-     * another packet for the rest, then drops whatever is left. */
+    // Unreliable messages in order while they fit; the caller may write
+    // another packet for the rest, then drops whatever is left.
     size_t taken = 0;
     while (taken + 3 <= e->unrel_len) {
         size_t mlen = 3 + (((size_t)e->unrel[taken + 1] << 8) | e->unrel[taken + 2]);
@@ -119,8 +119,8 @@ static void on_packet_acked(rel_endpoint *e, rel_sent *s, uint64_t now_ms, int s
 {
     s->acked = 1;
     if (sample_rtt) {
-        /* Every packet has its own send time, even when it carries resent
-         * messages, so the sample is never ambiguous (Karn's problem). */
+        // Every packet has its own send time, even when it carries resent
+        // messages, so the sample is never ambiguous (Karn's problem).
         double m = (double)(now_ms - s->sent_ms);
         if (!e->rtt_valid) {
             e->srtt_ms = m;
@@ -163,7 +163,7 @@ static void process_acks(rel_endpoint *e, uint16_t ack, uint32_t bits, uint64_t 
     }
 }
 
-/* Records an incoming sequence number. 0 for a duplicate or one too old to track. */
+// Records an incoming sequence number. 0 for a duplicate or one too old to track.
 static int note_received(rel_endpoint *e, uint16_t seq)
 {
     if (!e->have_remote) {
@@ -219,10 +219,10 @@ int rel_read_packet(rel_endpoint *e, uint64_t now_ms, rbuf *r, rel_deliver_fn fn
         size_t len = r->pos - start;
         int ahead = seq_diff(id, e->expect_id);
         if (ahead < 0 || ahead >= REL_WINDOW || len > HF_MAX_MSG)
-            continue;  /* already delivered, or outside the window */
+            continue;  // already delivered, or outside the window
         rel_in *in = &e->in[id % REL_WINDOW];
         if (in->used)
-            continue;  /* a resend of something we already hold */
+            continue;  // a resend of something we already hold
         in->used = 1;
         in->id = id;
         in->len = (uint16_t)len;

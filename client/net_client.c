@@ -33,8 +33,8 @@ int hf_client_open(hf_client *cl, const struct sockaddr *server, socklen_t len, 
     cl->fd = socket(server->sa_family, SOCK_DGRAM, 0);
     if (cl->fd < 0)
         return -1;
-    /* A connected UDP socket: send() needs no address, and recv() only ever
-     * returns packets from the server. */
+    // A connected UDP socket: send() needs no address, and recv() only ever
+    // returns packets from the server.
     if (connect(cl->fd, server, len) != 0) {
         close(cl->fd);
         cl->fd = -1;
@@ -96,7 +96,7 @@ ssize_t hf_client_recv_datagram(hf_client *cl, uint8_t *buf, size_t cap)
     for (;;) {
         ssize_t n = recv(cl->fd, buf, cap, 0);
         if (n >= 0 || errno != EINTR)
-            return n;  /* -1: EAGAIN, or ECONNREFUSED while nothing listens on the server port */
+            return n;  // -1: EAGAIN, or ECONNREFUSED while nothing listens on the server port
     }
 }
 

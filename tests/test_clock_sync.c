@@ -4,11 +4,13 @@
 
 #include "clock_sync.h"
 
-/* Simulated PING/PONG exchanges. Each direction takes 20 ms plus queueing
- * that is usually small but sometimes long, and the uplink is busier than
- * the downlink, so many samples are lopsided and their average is biased.
- * The estimate must stay within a few milliseconds of the true offset
- * anyway, across a 32-bit wrap-around of both clocks. */
+///////////////////////////////////////////////////////////////////////////////////
+// Simulated PING/PONG exchanges. Each direction takes 20 ms plus queueing
+// that is usually small but sometimes long, and the uplink is busier than
+// the downlink, so many samples are lopsided and their average is biased.
+// The estimate must stay within a few milliseconds of the true offset
+// anyway, across a 32-bit wrap-around of both clocks.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -28,7 +30,7 @@ static double rnd(void)
     return (double)(rng >> 11) / 9007199254740992.0;
 }
 
-/* Queueing delay: mostly 0-3 ms, but with probability p up to max ms. */
+// Queueing delay: mostly 0-3 ms, but with probability p up to max ms.
 static uint32_t queueing(double p, double max) { return (uint32_t)(rnd() < p ? rnd() * max : rnd() * 3); }
 
 static int32_t error_of(const clock_sync *c, uint32_t true_offset) { return (int32_t)(c->offset - true_offset); }
@@ -37,8 +39,8 @@ int main(void)
 {
     clock_sync c;
     cs_init(&c);
-    uint32_t local = 0xFFFFF000u;      /* the local clock wraps during the test */
-    uint32_t true_offset = 0x7FFFFF00u; /* and so does the server's */
+    uint32_t local = 0xFFFFF000u;      // the local clock wraps during the test
+    uint32_t true_offset = 0x7FFFFF00u; // and so does the server's
     double naive_sum = 0;
     int samples = 0, worst = 0;
 
@@ -58,7 +60,7 @@ int main(void)
     CHECK(worst <= 3);
     CHECK(c.rtt_min_ms >= 40 && c.rtt_min_ms <= 46);
 
-    /* Once settled, a small shift is followed gradually, never in one jump. */
+    // Once settled, a small shift is followed gradually, never in one jump.
     true_offset += 30;
     uint32_t before = c.offset;
     CHECK(cs_add(&c, local, local + 20 + true_offset, local + 40));
@@ -67,13 +69,13 @@ int main(void)
         cs_add(&c, local, local + 20 + true_offset, local + 40);
     CHECK(abs(error_of(&c, true_offset)) <= 1);
 
-    /* A large change (the server restarted) is taken at once. */
+    // A large change (the server restarted) is taken at once.
     true_offset += 10000;
     for (int i = 0; i < CS_WINDOW; i++, local += 500)
         cs_add(&c, local, local + 20 + true_offset, local + 40);
     CHECK(abs(error_of(&c, true_offset)) <= 1);
 
-    /* A reply that took longer than 5 seconds is ignored. */
+    // A reply that took longer than 5 seconds is ignored.
     CHECK(!cs_add(&c, local, local + true_offset, local + 6000));
 
     printf("clock_sync: all checks passed\n");

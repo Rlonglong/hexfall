@@ -4,15 +4,17 @@
 
 #include "interp.h"
 
-/* Snapshot interpolation against a simulated network: a server that sends
- * one snapshot per tick, a network that delays, jitters (and so reorders)
- * and loses them, and a 60 Hz screen. Time is simulated, so the results do
- * not depend on how busy the machine is.
- *
- * One player walks along x at 6 units/s, 0.2 per tick, so wherever it is
- * drawn must match the moment shown: x = 0.2 * (view.tick - FIRST), on
- * every frame that is not a guess. A second player, driven by the game's
- * physics the way a bot plays, is used to score the guesses. */
+///////////////////////////////////////////////////////////////////////////////////
+// Snapshot interpolation against a simulated network: a server that sends
+// one snapshot per tick, a network that delays, jitters (and so reorders)
+// and loses them, and a 60 Hz screen. Time is simulated, so the results do
+// not depend on how busy the machine is.
+//
+//     One player walks along x at 6 units/s, 0.2 per tick, so wherever it is
+//     drawn must match the moment shown: x = 0.2 * (view.tick - FIRST), on
+//     every frame that is not a guess. A second player, driven by the game's
+//     physics the way a bot plays, is used to score the guesses.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -33,13 +35,13 @@ static struct {
 static int nflight;
 static uint32_t next_tick;
 static double now;
-static uint32_t jump_at;  /* from this tick on, the player is 50 units further: a teleport */
+static uint32_t jump_at;  // from this tick on, the player is 50 units further: a teleport
 static int off_line, between;
 static uint32_t seed = 12345;
-static sim_arena board;  /* every tile there, none ever falls */
+static sim_arena board;  // every tile there, none ever falls
 
 #define PATH 1200
-static world_body path[PATH];  /* the physics player, tick FIRST + i */
+static world_body path[PATH];  // the physics player, tick FIRST + i
 static int use_path;
 
 static double rnd(void)
@@ -69,7 +71,7 @@ static void reset(void)
     off_line = between = 0;
 }
 
-/* `seconds` of a network that adds delay + U(0, jitter) ms and loses `loss`. */
+// `seconds` of a network that adds delay + U(0, jitter) ms and loses `loss`.
 static void play(interp *ip, double seconds, double delay, double jitter, double loss)
 {
     for (double end = now + seconds * 1000; now < end; now += FRAME_MS) {
@@ -95,15 +97,15 @@ static void play(interp *ip, double seconds, double delay, double jitter, double
         if (fabs(x - line) > 0.02 && fabs(x - line - 50) > 0.02)
             off_line++;
         if (fabs(x - line) > 0.25 && fabs(x - line - 50) > 0.25)
-            between++;  /* neither here nor there: slid across a teleport */
+            between++;  // neither here nor there: slid across a teleport
     }
 }
 
 static double share(uint64_t part, uint64_t whole) { return whole ? (double)part / (double)whole : 0; }
 
-/* A bot's run: one way for a while, then another, sometimes standing,
- * sometimes jumping, kept near the middle. It touches tiles, but on this
- * board none of them ever falls. */
+// A bot's run: one way for a while, then another, sometimes standing,
+// sometimes jumping, kept near the middle. It touches tiles, but on this
+// board none of them ever falls.
 static void make_path(void)
 {
     static sim_arena played;
@@ -135,7 +137,7 @@ int main(void)
     static interp ip;
     sim_arena_reset(&board);
 
-    /* A perfect network, fixed delay: always 3 ticks behind, never short. */
+    // A perfect network, fixed delay: always 3 ticks behind, never short.
     reset();
     interp_init(&ip, INTERP_FIXED, &board);
     play(&ip, 3, 20, 0, 0);
@@ -146,22 +148,22 @@ int main(void)
     CHECK(ip.stutter_ms < 0.5);
     CHECK(off_line == 0);
 
-    /* Adaptive on the same network: just over one tick behind. */
+    // Adaptive on the same network: just over one tick behind.
     interp_set_mode(&ip, INTERP_ADAPTIVE);
     play(&ip, 5, 20, 0, 0);
     printf("perfect network: adaptive delay %.1f ms\n", ip.delay_ms);
     CHECK(ip.delay_ms > TICK_MS && ip.delay_ms < TICK_MS + INTERP_MARGIN_MS + 3);
     CHECK(ip.frames_guessed == 0 && ip.stutter_ms < 0.5 && off_line == 0);
 
-    /* No smoothing: 30 snapshots a second on a 60 Hz screen step visibly. */
+    // No smoothing: 30 snapshots a second on a 60 Hz screen step visibly.
     interp_set_mode(&ip, INTERP_NONE);
     play(&ip, 3, 20, 0, 0);
     printf("perfect network: none stutters %.1f ms per frame\n", ip.stutter_ms);
     CHECK(ip.stutter_ms > 10);
 
-    /* A bad network: 40-160 ms and 5% lost. The fixed delay runs short
-     * often; the adaptive one grows until it rarely does, and every frame
-     * still shows the player where it was at the moment shown. */
+    // A bad network: 40-160 ms and 5% lost. The fixed delay runs short
+    // often; the adaptive one grows until it rarely does, and every frame
+    // still shows the player where it was at the moment shown.
     double bad[2], bad_delay = 0;
     for (int m = 0; m < 2; m++) {
         reset();
@@ -180,21 +182,21 @@ int main(void)
     CHECK(bad[1] < 0.03);
     CHECK(bad_delay > 120 + TICK_MS && bad_delay < INTERP_MAX_MS);
 
-    /* When the network gets better, the adaptive delay comes down, slowly. */
+    // When the network gets better, the adaptive delay comes down, slowly.
     play(&ip, 1, 20, 0, 0);
     CHECK(ip.delay_ms > 120);
     play(&ip, 15, 20, 0, 0);
     CHECK(ip.delay_ms < TICK_MS + INTERP_MARGIN_MS + 3);
 
-    /* A teleport is shown as a jump, not a slide across the floor. */
+    // A teleport is shown as a jump, not a slide across the floor.
     reset();
     interp_init(&ip, INTERP_ADAPTIVE, &board);
     jump_at = FIRST + 120;
     play(&ip, 8, 20, 30, 0);
     CHECK(between == 0);
 
-    /* An outage: nothing for a second. The screen guesses for a while, then
-     * stops and waits; once snapshots come again it carries on. */
+    // An outage: nothing for a second. The screen guesses for a while, then
+    // stops and waits; once snapshots come again it carries on.
     reset();
     interp_init(&ip, INTERP_ADAPTIVE, &board);
     play(&ip, 3, 20, 0, 0);
@@ -203,14 +205,14 @@ int main(void)
     play(&ip, 2, 20, 0, 0);
     CHECK(ip.waiting_ms == 0 && !ip.view.guessed && off_line == 0);
 
-    /* Guesses, scored on the physics player: a fixed delay on a bad network
-     * runs short often, so there is a lot to guess. */
+    // Guesses, scored on the physics player: a fixed delay on a bad network
+    // runs short often, so there is a lot to guess.
     make_path();
     double error[GUESS_MODES];
     for (int g = 0; g < GUESS_MODES; g++) {
         reset();
         use_path = 1;
-        seed = 777;  /* the same network for each */
+        seed = 777;  // the same network for each
         interp_init(&ip, INTERP_FIXED, &board);
         interp_set_guess(&ip, (interp_guess)g);
         play(&ip, 30, 40, 120, 0.05);
@@ -222,7 +224,7 @@ int main(void)
     use_path = 0;
     CHECK(error[GUESS_LET_GO] < error[GUESS_FREEZE] && error[GUESS_KEEP] < error[GUESS_FREEZE]);
 
-    /* The server restarted: its ticks start again from 1, and so does the history. */
+    // The server restarted: its ticks start again from 1, and so does the history.
     reset();
     interp_init(&ip, INTERP_FIXED, &board);
     play(&ip, 2, 20, 0, 0);
@@ -231,16 +233,16 @@ int main(void)
     interp_frame(&ip, (uint64_t)now + 16);
     CHECK(ip.base == 5 && ip.newest == 5 && ip.view.count == 1);
 
-    /* Reconnected to a server restarted so soon that its ticks are close to
-     * the old ones: the client starts over on the new session, so nothing of
-     * the new server is taken for late, and the delay is a perfect network's. */
+    // Reconnected to a server restarted so soon that its ticks are close to
+    // the old ones: the client starts over on the new session, so nothing of
+    // the new server is taken for late, and the delay is a perfect network's.
     reset();
     interp_init(&ip, INTERP_ADAPTIVE, &board);
     play(&ip, 3, 20, 0, 0);
     double before = ip.delay_ms;
     interp_restart(&ip);
     reset();
-    next_tick = FIRST - 60;  /* two seconds behind where the old server was */
+    next_tick = FIRST - 60;  // two seconds behind where the old server was
     now = 10000;
     for (; now < 13000; now += FRAME_MS) {
         world_snapshot r = snapshot(next_tick);
@@ -252,7 +254,7 @@ int main(void)
     }
     CHECK(ip.too_late == 0 && ip.mode == INTERP_ADAPTIVE && fabs(ip.delay_ms - before) < 10);
 
-    /* Tiles, at the moment shown. */
+    // Tiles, at the moment shown.
     sim_tile t = {.state = TILE_TOUCHED, .touch_tick = 200};
     CHECK(interp_tile_state(&t, 199.6) == TILE_SOLID);
     CHECK(interp_tile_state(&t, 200.0) == TILE_TOUCHED);

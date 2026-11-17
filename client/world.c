@@ -23,8 +23,8 @@ static world_note *note(world *w, uint64_t now_ms, const char *text)
     return n;
 }
 
-/* What a snapshot does not say (the cooldowns, where a shove went) is left
- * at 0; a shove in its swing is not a new one. */
+// What a snapshot does not say (the cooldowns, where a shove went) is left
+// at 0; a shove in its swing is not a new one.
 sim_body world_body_to_sim(const world_body *b)
 {
     return (sim_body){.x = b->x, .y = b->y, .z = b->z, .vx = b->vx, .vy = b->vy, .vz = b->vz,
@@ -59,7 +59,7 @@ int world_alive_count(const world *w)
 
 static void apply_board(world *w, const msg_tiles *m)
 {
-    uint32_t armed = w->arena.armed_tick;  /* from the ROOM message, not the board's */
+    uint32_t armed = w->arena.armed_tick;  // from the ROOM message, not the board's
     sim_arena_reset(&w->arena);
     w->arena.armed_tick = armed;
     int bit = 0;
@@ -90,8 +90,8 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         msg_welcome m;
         if (!hf_get_welcome(&p, &m))
             break;
-        /* A new session: what we knew may be stale (after a resync, most of it
-         * is), so start over; TILES and ROOM follow right behind. */
+        // A new session: what we knew may be stale (after a resync, most of it
+        // is), so start over; TILES and ROOM follow right behind.
         world_note keep[WORLD_FEED];
         int kept = w->note_count;
         uint32_t sessions = w->sessions;
@@ -110,10 +110,10 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         if (!hf_get_room(&p, &m))
             break;
         if (m.phase == PHASE_PLAYING && w->phase != PHASE_PLAYING)
-            w->body_count = 0;  /* last round's bodies are gone */
+            w->body_count = 0;  // last round's bodies are gone
         w->phase = m.phase;
         w->phase_end_tick = m.phase_end_tick;
-        w->arena.armed_tick = m.phase == PHASE_PLAYING ? m.phase_end_tick : 0;  /* the floor holds until then */
+        w->arena.armed_tick = m.phase == PHASE_PLAYING ? m.phase_end_tick : 0;  // the floor holds until then
         w->player_count = m.count;
         for (int i = 0; i < m.count; i++) {
             world_player *wp = &w->players[i];
@@ -126,7 +126,7 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         break;
     }
     case MSG_TILES: {
-        static msg_tiles m;  /* large; this function only runs on the main thread */
+        static msg_tiles m;  // large; this function only runs on the main thread
         if (hf_get_tiles(&p, &m))
             apply_board(w, &m);
         break;
@@ -161,7 +161,7 @@ void world_apply_event(world *w, const uint8_t *msg, size_t len, uint64_t now_ms
         char text[64];
         if (!hf_get_error(&p, &m))
             break;
-        snprintf(text, sizeof text, "Server: %.55s", m.text);  /* what fits in a note */
+        snprintf(text, sizeof text, "Server: %.55s", m.text);  // what fits in a note
         note(w, now_ms, text);
         break;
     }
@@ -174,7 +174,7 @@ int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out)
 {
     rbuf r, p;
     uint8_t type;
-    static msg_snapshot m;  /* main thread only */
+    static msg_snapshot m;  // main thread only
     rb_init(&r, msg, len);
     if (!hf_next_msg(&r, &type, &p) || type != MSG_SNAPSHOT || !hf_get_snapshot(&p, &m))
         return 0;
@@ -205,7 +205,7 @@ int world_decode_snapshot(const uint8_t *msg, size_t len, world_snapshot *out)
 void world_apply_snapshot(world *w, const world_snapshot *s, uint64_t arrived_ms)
 {
     if (w->have_snapshot && (int32_t)(s->tick - w->tick) <= 0) {
-        w->snapshots_late++;  /* overtaken by a newer one on the way */
+        w->snapshots_late++;  // overtaken by a newer one on the way
         return;
     }
     w->have_snapshot = 1;
@@ -214,6 +214,6 @@ void world_apply_snapshot(world *w, const world_snapshot *s, uint64_t arrived_ms
     w->ack_input = s->ack_input;
     w->body_count = s->count;
     memcpy(w->bodies, s->bodies, sizeof w->bodies[0] * (size_t)s->count);
-    sim_arena_tick(&w->arena, s->tick);  /* touched tiles whose time is up fall now */
+    sim_arena_tick(&w->arena, s->tick);  // touched tiles whose time is up fall now
     w->snapshots_used++;
 }

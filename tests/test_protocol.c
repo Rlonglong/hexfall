@@ -17,7 +17,7 @@
 
 static uint8_t buf[HF_MAX_MSG];
 
-/* Encodes into buf and returns a reader positioned on the single message's payload. */
+// Encodes into buf and returns a reader positioned on the single message's payload.
 static rbuf only_message(wbuf *w, uint8_t expect_type)
 {
     CHECK(!w->overflow);
@@ -53,14 +53,14 @@ static void test_roundtrips(void)
     msg_input in2;
     CHECK(hf_get_input(&p, &in2));
     CHECK(in2.count == 3);
-    for (int i = 0; i < 3; i++)  /* field by field: the struct has padding */
+    for (int i = 0; i < 3; i++)  // field by field: the struct has padding
         CHECK(in.s[i].seq == in2.s[i].seq && in.s[i].mx == in2.s[i].mx && in.s[i].mz == in2.s[i].mz &&
               in.s[i].buttons == in2.s[i].buttons);
 
     msg_room room = {.phase = PHASE_PLAYING, .tick = 77, .phase_end_tick = 99, .count = HF_MAX_PLAYERS};
     for (int i = 0; i < HF_MAX_PLAYERS; i++) {
         room.p[i] = (room_player){.id = (uint16_t)(i + 1), .color = (uint8_t)i, .flags = RP_READY, .place = 0};
-        memset(room.p[i].name, 'x', HF_NAME_MAX);  /* longest possible names must still fit */
+        memset(room.p[i].name, 'x', HF_NAME_MAX);  // longest possible names must still fit
     }
     wb_init(&w, buf, sizeof buf);
     hf_put_room(&w, &room);
@@ -80,7 +80,7 @@ static void test_roundtrips(void)
     msg_snapshot snap2;
     CHECK(hf_get_snapshot(&p, &snap2));
     CHECK(snap2.tick == snap.tick && snap2.ack_input == snap.ack_input && snap2.count == snap.count);
-    for (int i = 0; i < HF_MAX_PLAYERS; i++) {  /* field by field: the struct has padding */
+    for (int i = 0; i < HF_MAX_PLAYERS; i++) {  // field by field: the struct has padding
         const snap_player *a = &snap.p[i], *b = &snap2.p[i];
         CHECK(a->id == b->id && a->x == b->x && a->y == b->y && a->z == b->z && a->vx == b->vx && a->vy == b->vy &&
               a->vz == b->vz && a->facing == b->facing && a->flags == b->flags && a->layer == b->layer &&
@@ -116,7 +116,7 @@ static void test_roundtrips(void)
     CHECK(hf_get_error(&p, &err2) && err2.code == ERR_FULL && strcmp(err2.text, "room is full") == 0);
 }
 
-/* Cutting a message anywhere must be detected, never read past the end. */
+// Cutting a message anywhere must be detected, never read past the end.
 static void test_truncation(void)
 {
     msg_snapshot snap = {.tick = 1, .count = 5};
@@ -135,8 +135,8 @@ static void test_truncation(void)
     }
 }
 
-/* Throw random bytes at the decoders. Run it under `make asan` to catch any
- * out-of-bounds read. */
+// Throw random bytes at the decoders. Run it under `make asan` to catch any
+// out-of-bounds read.
 static void test_garbage(void)
 {
     uint8_t junk[300];
@@ -179,12 +179,12 @@ static void test_clean_name(void)
     hf_clean_name(a);
     CHECK(strcmp(a, "Bot-01") == 0);
 
-    /* 9 Chinese characters are 27 bytes; 24 bytes keep exactly 8 of them. */
+    // 9 Chinese characters are 27 bytes; 24 bytes keep exactly 8 of them.
     char b[64] = "一二三四五六七八九";
     hf_clean_name(b);
     CHECK(strcmp(b, "一二三四五六七八") == 0);
 
-    /* "ab" + 8 characters = 26 bytes; the cut at 24 splits the 8th, which must go. */
+    // "ab" + 8 characters = 26 bytes; the cut at 24 splits the 8th, which must go.
     char c[64] = "ab一二三四五六七八";
     hf_clean_name(c);
     CHECK(strcmp(c, "ab一二三四五六七") == 0);
@@ -215,8 +215,8 @@ static void test_tiles_and_sim(void)
         CHECK(sim_world_tile(x, z, &q2, &r2) && q2 == q && r2 == r);
     }
 
-    /* Standing still: the tile underfoot falls after SIM_FALL_TICKS, and the
-     * body drops to the floor below. */
+    // Standing still: the tile underfoot falls after SIM_FALL_TICKS, and the
+    // body drops to the floor below.
     sim_arena a;
     sim_body b;
     sim_input idle = {0};
@@ -230,8 +230,8 @@ static void test_tiles_and_sim(void)
     CHECK(b.layer == 1 && b.alive);
     CHECK(tick > SIM_FALL_TICKS);
 
-    /* The start of a round: standing still touches nothing until the arena
-     * is armed, and then the tile underfoot at once. */
+    // The start of a round: standing still touches nothing until the arena
+    // is armed, and then the tile underfoot at once.
     sim_arena_reset(&a);
     a.armed_tick = 31;
     sim_body_spawn(&b, 0, 0);
@@ -249,8 +249,8 @@ static void test_tiles_and_sim(void)
 
 static float speed_of(const sim_body *b) { return sqrtf(b->vx * b->vx + b->vz * b->vz); }
 
-/* Runs straight up the middle of the top floor (it is all tiles from
- * z = -24 to 24) for `ticks`, then jumps if asked; returns where it lands. */
+// Runs straight up the middle of the top floor (it is all tiles from
+// z = -24 to 24) for `ticks`, then jumps if asked; returns where it lands.
 static float run_and_jump(sim_body *b, int ticks, int jump)
 {
     static sim_arena a;
@@ -273,14 +273,14 @@ static float run_and_jump(sim_body *b, int ticks, int jump)
 static void test_sprint(void)
 {
     sim_body b;
-    /* Running builds up for about a second, then breaks into a sprint. */
+    // Running builds up for about a second, then breaks into a sprint.
     run_and_jump(&b, 30, 0);
     CHECK(speed_of(&b) >= SIM_MAX_SPEED && speed_of(&b) < SIM_SPRINT_FROM);
     run_and_jump(&b, 60, 0);
     CHECK(fabsf(speed_of(&b) - SIM_SPRINT_SPEED) < 0.01f);
 
-    /* Turning away ends it: a quarter turn, and a third of a second later
-     * the bean runs, no longer sprints. */
+    // Turning away ends it: a quarter turn, and a third of a second later
+    // the bean runs, no longer sprints.
     static sim_arena a;
     sim_arena_reset(&a);
     sim_input right = {.mx = 1};
@@ -289,8 +289,8 @@ static void test_sprint(void)
     CHECK(speed_of(&b) < SIM_SPRINT_FROM);
     CHECK(b.vx > 7.5f);
 
-    /* A jump keeps the speed it took off with: from a sprint it goes about
-     * as far as 11/8 of one from a run. */
+    // A jump keeps the speed it took off with: from a sprint it goes about
+    // as far as 11/8 of one from a run.
     float run = run_and_jump(&b, 10, 1), sprint = run_and_jump(&b, 60, 1);
     CHECK(run > 4.5f && sprint > run * 1.3f);
     printf("jump from a run %.1f units, from a sprint %.1f\n", run, sprint);
@@ -303,8 +303,8 @@ static void test_dive_and_shove(void)
     sim_body b;
     uint32_t t = 1;
 
-    /* A dive from standing, the stick forward: up and away, onto the belly,
-     * a slide, half a second deaf to everything, then up again. */
+    // A dive from standing, the stick forward: up and away, onto the belly,
+    // a slide, half a second deaf to everything, then up again.
     sim_arena_reset(&a);
     sim_body_spawn(&b, 0, -10);
     sim_body_step(&b, &(sim_input){.mz = 1, .dive = 1}, &a, t++, NULL, NULL);
@@ -318,14 +318,14 @@ static void test_dive_and_shove(void)
     while (b.move == MOVE_DOWN) {
         sim_body_step(&b, &everything, &a, t++, NULL, NULL);
         down++;
-        CHECK(b.move == MOVE_NONE || (b.grounded && b.shove_ticks == 0 && b.x == x0));  /* up again: all works */
+        CHECK(b.move == MOVE_NONE || (b.grounded && b.shove_ticks == 0 && b.x == x0));  // up again: all works
     }
     CHECK(down == SIM_DOWN_TICKS);
     float dived = b.z + 10;
     CHECK(dived > 5 && dived < 7.5f);
 
-    /* In the air, once, the way it is going: a dive at the top of a jump
-     * from a run goes further than the jump alone. */
+    // In the air, once, the way it is going: a dive at the top of a jump
+    // from a run goes further than the jump alone.
     float jump = run_and_jump(&b, 10, 1);
     sim_arena_reset(&a);
     sim_body_spawn(&b, 0, -23);
@@ -335,19 +335,19 @@ static void test_dive_and_shove(void)
     sim_body_step(&b, &(sim_input){.mz = 1, .jump = 1}, &a, t++, NULL, NULL);
     while (b.vy > 0)
         sim_body_step(&b, &none, &a, t++, NULL, NULL);
-    sim_body_step(&b, &(sim_input){.mx = 1, .dive = 1}, &a, t++, NULL, NULL);  /* the stick does not steer it */
+    sim_body_step(&b, &(sim_input){.mx = 1, .dive = 1}, &a, t++, NULL, NULL);  // the stick does not steer it
     CHECK(b.move == MOVE_DIVE && fabsf(b.vx) < 0.01f && b.vz > 11);
     float vz = b.vz;
     sim_body_step(&b, &(sim_input){.dive = 1}, &a, t++, NULL, NULL);
-    CHECK(b.vz == vz);  /* no second dive */
+    CHECK(b.vz == vz);  // no second dive
     while (!b.grounded)
         sim_body_step(&b, &none, &a, t++, NULL, NULL);
     printf("jump from a run %.1f units, with a dive at the top %.1f; a dive from standing %.1f\n", jump, b.z - z0,
            dived);
     CHECK(b.z - z0 > jump + 2);
 
-    /* A shove: the bean in front goes away and off its feet; one behind,
-     * one too far to the side and one too far away do not; once a second. */
+    // A shove: the bean in front goes away and off its feet; one behind,
+    // one too far to the side and one too far away do not; once a second.
     sim_arena_reset(&a);
     sim_body s, front, back, side, far;
     sim_body_spawn(&s, 0, 0);
@@ -366,10 +366,10 @@ static void test_dive_and_shove(void)
             CHECK(front.vz >= 10 && !front.grounded);
             CHECK(back.vz == 0 && back.grounded && side.vx == 0 && side.grounded && far.grounded);
         } else if (t == 2) {
-            CHECK(s.shove_ticks == SIM_SHOVE_SWING - 1);  /* held down: no new shove */
+            CHECK(s.shove_ticks == SIM_SHOVE_SWING - 1);  // held down: no new shove
         }
     }
-    CHECK(s.shove_ticks == SIM_SHOVE_SWING);  /* a second later, again */
+    CHECK(s.shove_ticks == SIM_SHOVE_SWING);  // a second later, again
 }
 
 int main(void)

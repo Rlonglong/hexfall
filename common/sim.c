@@ -9,14 +9,14 @@ const float SIM_LAYER_Y[SIM_LAYERS] = {0.0f, -12.0f, -24.0f};
 #define GRAVITY 40.0f
 #define JUMP_SPEED 13.0f
 #define ACCEL_GROUND 34.0f
-#define BUILD_UP 0.5f       /* per second, from SIM_MAX_SPEED to SIM_SPRINT_FROM */
-#define SPRINT_ACCEL 10.0f  /* per second, from SIM_SPRINT_FROM to SIM_SPRINT_SPEED */
+#define BUILD_UP 0.5f       // per second, from SIM_MAX_SPEED to SIM_SPRINT_FROM
+#define SPRINT_ACCEL 10.0f  // per second, from SIM_SPRINT_FROM to SIM_SPRINT_SPEED
 #define DIVE_SPEED 12.0f
-#define DIVE_LIFT 5.0f       /* a dive goes up at least this fast */
-#define SLIDE_FRICTION 24.0f /* per second, on the belly: 12 slides to a stop in 0.5 s */
-#define SHOVE_PUSH 10.0f     /* a shoved body goes away at least this fast */
-#define SHOVE_LIFT 5.0f      /* and off its feet */
-#define SHOVE_CONE 0.34f     /* cos 70 degrees: how far to the side a shove reaches */
+#define DIVE_LIFT 5.0f       // a dive goes up at least this fast
+#define SLIDE_FRICTION 24.0f // per second, on the belly: 12 slides to a stop in 0.5 s
+#define SHOVE_PUSH 10.0f     // a shoved body goes away at least this fast
+#define SHOVE_LIFT 5.0f      // and off its feet
+#define SHOVE_CONE 0.34f     // cos 70 degrees: how far to the side a shove reaches
 #define JUMP_COOLDOWN_TICKS 9
 #define WORLD_LIMIT 60.0f
 #define SQRT3 1.7320508f
@@ -72,7 +72,7 @@ void sim_tile_center(int q, int r, float *x, float *z)
 
 int sim_world_tile(float x, float z, int *q, int *r)
 {
-    /* Pointy-top axial coordinates, then cube rounding. */
+    // Pointy-top axial coordinates, then cube rounding.
     float qf = (SQRT3 / 3.0f * x - z / 3.0f) / SIM_HEX_SIZE;
     float rf = (2.0f / 3.0f * z) / SIM_HEX_SIZE;
     float sf = -qf - rf;
@@ -87,7 +87,7 @@ int sim_world_tile(float x, float z, int *q, int *r)
     return sim_tile_index(*q, *r) >= 0;
 }
 
-/* Index of the tile under (x, z) on a floor, or -1 if there is none or it is gone. */
+// Index of the tile under (x, z) on a floor, or -1 if there is none or it is gone.
 static int solid_tile(const sim_arena *a, int layer, float x, float z, int *q, int *r)
 {
     if (layer < 0 || layer >= SIM_LAYERS || !sim_world_tile(x, z, q, r))
@@ -109,7 +109,7 @@ void sim_arena_reset(sim_arena *a)
 {
     if (!tables_ready)
         build_tables();
-    memset(a, 0, sizeof *a);  /* every tile TILE_SOLID */
+    memset(a, 0, sizeof *a);  // every tile TILE_SOLID
 }
 
 void sim_touch(sim_arena *a, int layer, int q, int r, uint32_t tick, sim_touch_fn fn, void *ctx)
@@ -159,10 +159,10 @@ void sim_body_spawn(sim_body *b, float x, float z)
     b->facing = atan2f(-x, -z);
 }
 
-/* How fast the stick asks to go, given how fast the bean already goes its
- * way. The velocity is all the state a sprint has, so a snapshot carries it
- * and a prediction replays it like any other motion. `len` is the stick's
- * tilt, 0..1, and (mx, mz) the stick. */
+// How fast the stick asks to go, given how fast the bean already goes its
+// way. The velocity is all the state a sprint has, so a snapshot carries it
+// and a prediction replays it like any other motion. `len` is the stick's
+// tilt, 0..1, and (mx, mz) the stick.
 static float wanted_speed(const sim_body *b, float mx, float mz, float len)
 {
     float want = len * SIM_MAX_SPEED;
@@ -170,13 +170,13 @@ static float wanted_speed(const sim_body *b, float mx, float mz, float len)
         return want;
     float along = (b->vx * mx + b->vz * mz) / len;
     if (along < want - 0.25f)
-        return want;  /* not up to speed yet, or heading somewhere else */
+        return want;  // not up to speed yet, or heading somewhere else
     float gain = along < SIM_SPRINT_FROM ? BUILD_UP : SPRINT_ACCEL;
     return fminf(fmaxf(along, want) + gain * DT, SIM_SPRINT_SPEED);
 }
 
-/* Where a dive or a shove goes: on the floor the way the stick points, if
- * it does; otherwise (and always in the air) the way the bean faces. */
+// Where a dive or a shove goes: on the floor the way the stick points, if
+// it does; otherwise (and always in the air) the way the bean faces.
 static void aim(const sim_body *b, float mx, float mz, float len, float *dx, float *dz)
 {
     if (b->grounded && len > 0.1f) {
@@ -204,7 +204,7 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
     if (b->shove_ticks > 0)
         b->shove_ticks--;
     if (b->move == MOVE_DOWN && --b->move_ticks <= 0) {
-        b->move = MOVE_NONE;  /* back on its feet */
+        b->move = MOVE_NONE;  // back on its feet
         b->move_ticks = 0;
     }
     if (in->dive && b->move == MOVE_NONE) {
@@ -222,10 +222,10 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         b->shove_cooldown = SIM_SHOVE_COOLDOWN;
         b->facing = atan2f(b->shove_x, b->shove_z);
     }
-    /* Only on the floor, and on its feet. In the air the stick does
-     * nothing: a jump goes where the bean was heading when it left the
-     * floor, whatever the player (or the camera) does on the way. Lying
-     * down, it slides to a stop. */
+    // Only on the floor, and on its feet. In the air the stick does
+    // nothing: a jump goes where the bean was heading when it left the
+    // floor, whatever the player (or the camera) does on the way. Lying
+    // down, it slides to a stop.
     if (b->grounded && b->move == MOVE_NONE) {
         float accel = ACCEL_GROUND * DT, want = wanted_speed(b, mx, mz, fminf(len, 1.0f));
         float tx = len > 0 ? mx / fminf(len, 1.0f) * want : 0, tz = len > 0 ? mz / fminf(len, 1.0f) * want : 0;
@@ -244,13 +244,13 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
     int q, r;
     if (b->grounded) {
         if (solid_tile(a, b->layer, b->x, b->z, &q, &r) < 0) {
-            b->grounded = 0;  /* the floor fell away, or we walked off it */
+            b->grounded = 0;  // the floor fell away, or we walked off it
             b->vy = 0;
         } else {
             b->y = SIM_LAYER_Y[b->layer];
             sim_touch(a, b->layer, q, r, tick, fn, ctx);
             if (in->jump && b->jump_cooldown == 0 && b->move == MOVE_NONE) {
-                b->vy = JUMP_SPEED;  /* airborne: no tiles touched until landing */
+                b->vy = JUMP_SPEED;  // airborne: no tiles touched until landing
                 b->grounded = 0;
                 b->jump_cooldown = JUMP_COOLDOWN_TICKS;
             }
@@ -261,7 +261,7 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         b->vy -= GRAVITY * DT;
         b->y += b->vy * DT;
         if (b->vy < 0) {
-            /* Falling past a floor: land if there is a tile right there. */
+            // Falling past a floor: land if there is a tile right there.
             for (int layer = 0; layer < SIM_LAYERS; layer++) {
                 float h = SIM_LAYER_Y[layer];
                 if (y0 >= h - 0.001f && b->y <= h && solid_tile(a, layer, b->x, b->z, &q, &r) >= 0) {
@@ -270,7 +270,7 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
                     b->grounded = 1;
                     b->layer = layer;
                     if (b->move == MOVE_DIVE) {
-                        b->move = MOVE_DOWN;  /* on its belly */
+                        b->move = MOVE_DOWN;  // on its belly
                         b->move_ticks = SIM_DOWN_TICKS;
                     }
                     sim_touch(a, layer, q, r, tick, fn, ctx);
@@ -285,10 +285,10 @@ void sim_body_step(sim_body *b, const sim_input *in, sim_arena *a, uint32_t tick
         b->facing = atan2f(b->vx, b->vz);
 }
 
-/* Everybody in front of a bean that shoves this tick, close enough, goes
- * away at least SHOVE_PUSH and off their feet, so the stick cannot fight
- * it until they land. Bodies are only read here before they are pushed, and
- * a push never moves anyone, so the order does not matter. */
+// Everybody in front of a bean that shoves this tick, close enough, goes
+// away at least SHOVE_PUSH and off their feet, so the stick cannot fight
+// it until they land. Bodies are only read here before they are pushed, and
+// a push never moves anyone, so the order does not matter.
 void sim_shoves(sim_body **bodies, int n)
 {
     for (int i = 0; i < n; i++) {

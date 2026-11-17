@@ -2,10 +2,10 @@
 
 #include <string.h>
 
-#define MAX_RTT_MS 5000u  /* longer than this is a stale or bogus reply */
-#define SETTLE_SAMPLES 4  /* until then, follow the best sample directly */
-#define SLEW_MS 2         /* once settled, move at most this much per sample */
-#define JUMP_MS 100       /* farther off than this, jump instead (server restarted) */
+#define MAX_RTT_MS 5000u  // longer than this is a stale or bogus reply
+#define SETTLE_SAMPLES 4  // until then, follow the best sample directly
+#define SLEW_MS 2         // once settled, move at most this much per sample
+#define JUMP_MS 100       // farther off than this, jump instead (server restarted)
 
 void cs_init(clock_sync *c) { memset(c, 0, sizeof *c); }
 
@@ -20,7 +20,7 @@ int cs_add(clock_sync *c, uint32_t t0, uint32_t ts, uint32_t t1)
     if (c->count < CS_WINDOW)
         c->count++;
 
-    /* Oldest to newest, so that among equally fast samples the newest wins. */
+    // Oldest to newest, so that among equally fast samples the newest wins.
     int start = c->count < CS_WINDOW ? 0 : c->next, best = start;
     double sum = 0;
     for (int i = 0; i < c->count; i++) {

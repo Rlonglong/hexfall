@@ -13,14 +13,14 @@
 #include "net_client.h"
 #include "util.h"
 
-#define FLUSH_MS 33           /* at least one packet per tick: acks and heartbeat */
-#define CONN_TIMEOUT_MS 4000  /* same as the server's */
-#define RETRY_MS 3000         /* a handshake that gets no WELCOME starts over */
-#define PING_FAST_MS 100      /* a quick burst after connecting so the clock settles fast */
+#define FLUSH_MS 33           // at least one packet per tick: acks and heartbeat
+#define CONN_TIMEOUT_MS 4000  // same as the server's
+#define RETRY_MS 3000         // a handshake that gets no WELCOME starts over
+#define PING_FAST_MS 100      // a quick burst after connecting so the clock settles fast
 #define PING_FAST_COUNT 5
 #define PING_MS 500
-#define WAIT_MAX_MS 100       /* wake up at least this often to run the state machine */
-#define HELD_SLOTS 256        /* received packets held back by the inbound disturbance */
+#define WAIT_MAX_MS 100       // wake up at least this often to run the state machine
+#define HELD_SLOTS 256        // received packets held back by the inbound disturbance
 #define DRAIN_BATCH 32
 
 typedef struct {
@@ -31,29 +31,29 @@ typedef struct {
 } held_packet;
 
 struct net_thread {
-    /* Written by net_start before the thread exists; read-only afterwards. */
+    // Written by net_start before the thread exists; read-only afterwards.
     struct sockaddr_storage addr;
     socklen_t addr_len;
     char name[HF_NAME_MAX + 1];
     uint8_t kind;
     pthread_t thread;
-    int wake[2];  /* self-pipe: the main thread writes, the network thread polls */
-    int ready;    /* INIT_* bits: what net_start managed to set up, so teardown undoes exactly that */
+    int wake[2];  // self-pipe: the main thread writes, the network thread polls
+    int ready;    // INIT_* bits: what net_start managed to set up, so teardown undoes exactly that
 
-    /* Channels; each has its own lock (msg_queue.h). */
+    // Channels; each has its own lock (msg_queue.h).
     mq_fifo outbox, events;
     mq_ring snapshots;
 
-    /* Under status_lock: what the network thread publishes and what the main
-     * thread asks for. Both sides only copy in and out. */
+    // Under status_lock: what the network thread publishes and what the main
+    // thread asks for. Both sides only copy in and out.
     pthread_mutex_t status_lock;
     net_status published;
     netsim_cfg inbound_request;
     int stop_request;
 
-    /* Network thread only; no other thread reads or writes these. */
+    // Network thread only; no other thread reads or writes these.
     hf_client client;
-    net_status st;  /* working copy, published once per loop */
+    net_status st;  // working copy, published once per loop
     clock_sync clock;
     netsim_cfg inbound;
     uint64_t state_since_ms, next_flush_ms, next_ping_ms, arrival_ms;
@@ -76,7 +76,7 @@ const char *net_state_name(net_state s)
     }
 }
 
-/* ---- network thread ---- */
+// ---- network thread ----
 
 static void set_state(net_thread *n, net_state s, uint64_t now_ms)
 {
@@ -101,7 +101,7 @@ static void on_message(hf_client *cl, uint8_t type, rbuf *payload, const uint8_t
         return;
     }
     if (!hf_msg_is_reliable(type) || n->st.state == NET_RESYNCING)
-        return;  /* while resyncing, the main thread will get a fresh copy of everything */
+        return;  // while resyncing, the main thread will get a fresh copy of everything
     if (type == MSG_WELCOME) {
         n->st.token = cl->token;
         n->st.player_id = cl->player_id;
@@ -116,18 +116,18 @@ static void on_message(hf_client *cl, uint8_t type, rbuf *payload, const uint8_t
     set_state(n, NET_RESYNCING, n->arrival_ms);
 }
 
-/* A new socket and a new session. With a token, the server hands back the same player. */
+// A new socket and a new session. With a token, the server hands back the same player.
 static void open_session(net_thread *n, net_state state, uint64_t now_ms)
 {
-    /* Packets held back from the old socket belong to the old session; fed to
-     * the new one, their sequence numbers and acks would corrupt its state. */
+    // Packets held back from the old socket belong to the old session; fed to
+    // the new one, their sequence numbers and acks would corrupt its state.
     for (int i = 0; i < HELD_SLOTS; i++)
         n->held[i].used = 0;
     if (n->client.fd >= 0)
         hf_client_close(&n->client);
     if (hf_client_open(&n->client, (struct sockaddr *)&n->addr, n->addr_len, on_message, n) != 0) {
         hf_log("net[%s]: socket: %s", n->name, strerror(errno));
-        n->client.fd = -1;  /* retried after RETRY_MS */
+        n->client.fd = -1;  // retried after RETRY_MS
     } else {
         hf_client_hello(&n->client, n->name, n->kind, n->st.token);
     }
@@ -151,7 +151,7 @@ static int hold_packet(net_thread *n, const uint8_t *buf, size_t len, uint64_t d
         memcpy(h->data, buf, len);
         return 1;
     }
-    return 0;  /* all slots busy: let it through now */
+    return 0;  // all slots busy: let it through now
 }
 
 static void receive(net_thread *n, uint64_t now_ms)
@@ -178,7 +178,7 @@ static void release_held(net_thread *n, uint64_t now_ms)
         if (!h->used || h->due_ms > now_ms)
             continue;
         h->used = 0;
-        n->arrival_ms = now_ms;  /* to the rest of the program it arrives now */
+        n->arrival_ms = now_ms;  // to the rest of the program it arrives now
         hf_client_process(&n->client, h->data, h->len, now_ms);
     }
 }
@@ -225,8 +225,8 @@ static void run_state_machine(net_thread *n, uint64_t now_ms)
     }
 }
 
-/* Returns 1 if a ping was queued. It must go out at once: t0 is taken now,
- * and any wait before sending would make the round trip lopsided. */
+// Returns 1 if a ping was queued. It must go out at once: t0 is taken now,
+// and any wait before sending would make the round trip lopsided.
 static int maybe_ping(net_thread *n, uint64_t now_ms)
 {
     if (!n->client.welcomed || now_ms < n->next_ping_ms)
@@ -257,8 +257,8 @@ static int wait_ms(net_thread *n, uint64_t now_ms)
     return w > WAIT_MAX_MS ? WAIT_MAX_MS : w;
 }
 
-/* The one point per loop where the two threads meet: publish our status, pick
- * up the main thread's requests. Returns 1 when asked to stop. */
+// The one point per loop where the two threads meet: publish our status, pick
+// up the main thread's requests. Returns 1 when asked to stop.
 static int sync_with_main(net_thread *n)
 {
     n->st.clock_valid = n->clock.valid;
@@ -269,7 +269,7 @@ static int sync_with_main(net_thread *n)
     n->st.packets_in = n->client.rel.packets_received;
     n->st.packets_out = n->client.rel.packets_sent;
     n->st.resends = n->client.rel.resends;
-    n->st.outbox_refused = mq_fifo_refused(&n->outbox);  /* its own lock, never nested */
+    n->st.outbox_refused = mq_fifo_refused(&n->outbox);  // its own lock, never nested
     n->st.inbound = n->inbound;
 
     pthread_mutex_lock(&n->status_lock);
@@ -291,7 +291,7 @@ static void say_goodbye(net_thread *n)
         hf_put_bye(&w, &bye);
         hf_client_send(&n->client, buf, w.len);
         hf_client_flush(&n->client, now_ms);
-        netsim_flush(UINT64_MAX);  /* do not leave the goodbye in a delay queue */
+        netsim_flush(UINT64_MAX);  // do not leave the goodbye in a delay queue
         hf_client_close(&n->client);
     }
     netsim_release();
@@ -306,7 +306,7 @@ static void *run(void *arg)
     while (!sync_with_main(n)) {
         uint64_t now_ms = hf_now_ms();
         struct pollfd p[2] = {
-            {.fd = n->client.fd, .events = POLLIN},  /* a negative fd is ignored by poll */
+            {.fd = n->client.fd, .events = POLLIN},  // a negative fd is ignored by poll
             {.fd = n->wake[0], .events = POLLIN},
         };
         if (poll(p, 2, wait_ms(n, now_ms)) < 0 && errno != EINTR) {
@@ -322,8 +322,8 @@ static void *run(void *arg)
         int queued = drain_outbox(n);
         run_state_machine(n, now_ms);
         queued += maybe_ping(n, now_ms);
-        /* Send at once when something was queued (an input or a ping should
-         * not wait for the next tick); otherwise once per tick for acks. */
+        // Send at once when something was queued (an input or a ping should
+        // not wait for the next tick); otherwise once per tick for acks.
         if (queued || now_ms >= n->next_flush_ms) {
             hf_client_flush(&n->client, now_ms);
             n->next_flush_ms = now_ms + FLUSH_MS;
@@ -334,12 +334,12 @@ static void *run(void *arg)
     return NULL;
 }
 
-/* ---- main thread side ---- */
+// ---- main thread side ----
 
 static void wake_up(net_thread *n)
 {
     uint8_t b = 1;
-    ssize_t r = write(n->wake[1], &b, 1);  /* EAGAIN: a wake-up is already pending */
+    ssize_t r = write(n->wake[1], &b, 1);  // EAGAIN: a wake-up is already pending
     (void)r;
 }
 

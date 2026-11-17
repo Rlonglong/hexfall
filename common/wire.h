@@ -5,16 +5,18 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Byte-level reading and writing for the wire format.
- *
- * Every multi-byte field is big-endian (network byte order). A browser reads
- * the same bytes with DataView, whose getters default to big-endian, so the
- * C and JavaScript sides never disagree. Structs are never memcpy'd onto the
- * wire: padding and byte order differ between machines.
- *
- * Writers and readers never touch memory outside their buffer. Running past
- * the end sets `overflow` / `error` and turns later calls into no-ops, so a
- * caller can write or read a whole message and check the flag once. */
+///////////////////////////////////////////////////////////////////////////////////
+// Byte-level reading and writing for the wire format.
+//
+//     Every multi-byte field is big-endian (network byte order). A browser reads
+//     the same bytes with DataView, whose getters default to big-endian, so the
+//     C and JavaScript sides never disagree. Structs are never memcpy'd onto the
+//     wire: padding and byte order differ between machines.
+//
+//     Writers and readers never touch memory outside their buffer. Running past
+//     the end sets `overflow` / `error` and turns later calls into no-ops, so a
+//     caller can write or read a whole message and check the flag once.
+///////////////////////////////////////////////////////////////////////////////////
 
 typedef struct {
     uint8_t *buf;
@@ -86,7 +88,7 @@ static inline void wb_bytes(wbuf *w, const void *p, size_t n)
     w->len += n;
 }
 
-/* u8 length, then that many UTF-8 bytes. Longer strings are cut at 255 bytes. */
+// u8 length, then that many UTF-8 bytes. Longer strings are cut at 255 bytes.
 static inline void wb_str(wbuf *w, const char *s)
 {
     size_t n = strlen(s);
@@ -157,8 +159,8 @@ static inline void rb_bytes(rbuf *r, void *out, size_t n)
     r->pos += n;
 }
 
-/* Reads a u8-length string into out (cap counts the NUL). A longer string is
- * truncated; the caller cleans up any UTF-8 sequence cut in half. */
+// Reads a u8-length string into out (cap counts the NUL). A longer string is
+// truncated; the caller cleans up any UTF-8 sequence cut in half.
 static inline void rb_str(rbuf *r, char *out, size_t cap)
 {
     size_t n = rb_u8(r);
@@ -173,7 +175,7 @@ static inline void rb_str(rbuf *r, char *out, size_t cap)
     r->pos += n;
 }
 
-/* Splits the next n bytes off as their own reader. */
+// Splits the next n bytes off as their own reader.
 static inline rbuf rb_sub(rbuf *r, size_t n)
 {
     rbuf s;

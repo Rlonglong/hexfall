@@ -6,8 +6,10 @@
 #include "sim.h"
 #include "world.h"
 
-/* The client's game state, fed the messages a server would send, including
- * a second WELCOME as after a resync. */
+///////////////////////////////////////////////////////////////////////////////////
+// The client's game state, fed the messages a server would send, including
+// a second WELCOME as after a resync.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -28,7 +30,7 @@ static size_t welcome(uint16_t id, uint32_t tick)
     return w.len;
 }
 
-/* Encoded and decoded again, as the client gets it from the snapshot channel. */
+// Encoded and decoded again, as the client gets it from the snapshot channel.
 static const world_snapshot *snapshot(uint32_t tick, uint16_t id, float x)
 {
     static world_snapshot out;
@@ -41,7 +43,7 @@ static const world_snapshot *snapshot(uint32_t tick, uint16_t id, float x)
     return &out;
 }
 
-/* A dive and a shove come through as the simulation's own state. */
+// A dive and a shove come through as the simulation's own state.
 static void test_moves(void)
 {
     static world_snapshot out;
@@ -82,7 +84,7 @@ int main(void)
     tiles.layers = SIM_LAYERS;
     tiles.ring = SIM_RING;
     tiles.gone_bytes = (SIM_LAYERS * SIM_TILES + 7) / 8;
-    tiles.gone[0] = 0x80;  /* tile 0 of the top floor */
+    tiles.gone[0] = 0x80;  // tile 0 of the top floor
     wb_init(&wb, buf, sizeof buf);
     hf_put_tiles(&wb, &tiles);
     world_apply_event(&w, buf, wb.len, 0);
@@ -95,8 +97,8 @@ int main(void)
     int centre = sim_tile_index(0, 0);
     CHECK(w.arena.tiles[0][centre].state == TILE_TOUCHED);
 
-    /* Snapshots: a newer one is used, an older one that arrives later is not,
-     * and the touched tile falls once the server's time passes its moment. */
+    // Snapshots: a newer one is used, an older one that arrives later is not,
+    // and the touched tile falls once the server's time passes its moment.
     world_apply_snapshot(&w, snapshot(105, 7, 1.5f), 1000);
     CHECK(w.tick == 105 && w.body_count == 1 && world_body_by_id(&w, 7)->x == 1.5f);
     world_apply_snapshot(&w, snapshot(104, 7, 9.0f), 1001);
@@ -105,7 +107,7 @@ int main(void)
     world_apply_snapshot(&w, snapshot(101 + SIM_FALL_TICKS, 7, 2.0f), 1002);
     CHECK(w.arena.tiles[0][centre].state == TILE_GONE);
 
-    /* A knock-out keeps who and where, for the renderer to show its own way. */
+    // A knock-out keeps who and where, for the renderer to show its own way.
     msg_eliminated ko = {.player_id = 7, .place = 3, .tick = 130};
     wb_init(&wb, buf, sizeof buf);
     hf_put_eliminated(&wb, &ko);
@@ -113,8 +115,8 @@ int main(void)
     CHECK(w.note_count == 1 && w.notes[0].knockout && w.notes[0].player == 7 && w.notes[0].place == 3);
     CHECK(w.notes[0].at_ms == 5000 && w.notes[0].tick == 130 && strstr(w.notes[0].text, "#3"));
 
-    /* A second WELCOME (after a resync) forgets the old board and bodies,
-     * but not what just happened. */
+    // A second WELCOME (after a resync) forgets the old board and bodies,
+    // but not what just happened.
     world_apply_event(&w, buf, welcome(7, 300), 0);
     CHECK(w.welcomed && !w.have_board && w.body_count == 0 && w.arena.tiles[0][centre].state == TILE_SOLID);
     CHECK(w.sessions == 2);

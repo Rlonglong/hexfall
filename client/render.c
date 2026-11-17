@@ -10,13 +10,15 @@
 #include "rlgl.h"
 #include "util.h"
 
-/* The look follows the browser prototype: pastel hex floors lit by a
- * sky/ground hemisphere and a warm sun, sky-coloured fog, white pillars
- * around a purple slime, and a dark broadcast-style HUD where amber always
- * means "you". Everything this file keeps is for looks only. Where a bean
- * stands, and the moment the whole scene shows (tiles included), come from
- * the interpolation's view (interp.h), except for our own bean and the
- * tiles it has been on, which come from the prediction (predict.h). */
+///////////////////////////////////////////////////////////////////////////////////
+// The look follows the browser prototype: pastel hex floors lit by a
+// sky/ground hemisphere and a warm sun, sky-coloured fog, white pillars
+// around a purple slime, and a dark broadcast-style HUD where amber always
+// means "you". Everything this file keeps is for looks only. Where a bean
+// stands, and the moment the whole scene shows (tiles included), come from
+// the interpolation's view (interp.h), except for our own bean and the
+// tiles it has been on, which come from the prediction (predict.h).
+///////////////////////////////////////////////////////////////////////////////////
 
 #define SKY ((Color){168, 214, 232, 255})
 #define SLIME ((Color){176, 106, 224, 255})
@@ -35,9 +37,9 @@
 #define RULE ((Color){43, 55, 61, 255})
 
 static const Color LAYER_COLORS[SIM_LAYERS] = {
-    {255, 143, 184, 255},  /* top: pink */
-    {255, 211, 107, 255},  /* middle: yellow */
-    {122, 215, 201, 255},  /* bottom: teal */
+    {255, 143, 184, 255},  // top: pink
+    {255, 211, 107, 255},  // middle: yellow
+    {122, 215, 201, 255},  // bottom: teal
 };
 
 static const Color PLAYER_COLORS[16] = {
@@ -47,7 +49,7 @@ static const Color PLAYER_COLORS[16] = {
     {143, 155, 255, 255}, {255, 184, 107, 255}, {100, 227, 161, 255}, {213, 140, 255, 255},
 };
 
-/* ---- lighting: hemisphere + sun + fog, one shade per face for the tiles ---- */
+// ---- lighting: hemisphere + sun + fog, one shade per face for the tiles ----
 
 static const char LIT_VS[] =
     "#version 330\n"
@@ -72,7 +74,7 @@ static const char LIT_FS[] =
     "uniform vec3 emissive;\n"
     "uniform vec3 viewPos;\n"
     "out vec4 finalColor;\n"
-    "const vec3 SUN_DIR = vec3(0.318, 0.848, 0.424);\n" /* toward (30, 80, 40) */
+    "const vec3 SUN_DIR = vec3(0.318, 0.848, 0.424);\n" // toward (30, 80, 40)
     "const vec3 SUN = vec3(1.0, 0.953, 0.82) * 0.45;\n"
     "const vec3 SKY_LIGHT = vec3(0.68);\n"
     "const vec3 GROUND_LIGHT = vec3(0.42, 0.31, 0.48) * 0.68;\n"
@@ -91,10 +93,10 @@ static Material mat;
 static Mesh hex, ball, pillar, slime, disc, cone;
 static Texture2D dot;
 
-/* ---- fonts: player names may be in any script, so the atlas grows ---- */
+// ---- fonts: player names may be in any script, so the atlas grows ----
 
 static const char *const BODY_FONTS[] = {
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  /* macOS; covers CJK */
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  // macOS; covers CJK
     "/Library/Fonts/Arial Unicode.ttf",
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -116,23 +118,23 @@ static Font body_font, display_font;
 static int body_loaded, display_loaded;
 static int codepoints[MAX_CODEPOINTS], codepoint_count, codepoints_added;
 
-/* ---- cosmetic state ---- */
+// ---- cosmetic state ----
 
 typedef struct {
     uint16_t id;
     int used, was_alive;
     float face;
-    float lag_vx, lag_vz;  /* its velocity a moment ago: what it bumps into others with */
-    float bump;            /* 1 the moment it bumps into someone, fading to 0 */
-    float power;           /* how hard that bump was, 0.3 (a nudge) to 1.6 (head-on, flat out) */
-    float flash;           /* glows white for a moment after a bump */
-    float push_x, push_z;  /* the way it was pushed */
-    float sprint;          /* 0 running, 1 sprinting, smoothed */
+    float lag_vx, lag_vz;  // its velocity a moment ago: what it bumps into others with
+    float bump;            // 1 the moment it bumps into someone, fading to 0
+    float power;           // how hard that bump was, 0.3 (a nudge) to 1.6 (head-on, flat out)
+    float flash;           // glows white for a moment after a bump
+    float push_x, push_z;  // the way it was pushed
+    float sprint;          // 0 running, 1 sprinting, smoothed
     int sprinting;
-    float dust;            /* time to the next puff under its feet */
-    float lie;             /* 0 upright, 1 flat on its belly (a dive), smoothed */
+    float dust;            // time to the next puff under its feet
+    float lie;             // 0 upright, 1 flat on its belly (a dive), smoothed
     int was_move, was_shoving;
-    float shove;           /* 1 the moment it shoves, fading to 0 */
+    float shove;           // 1 the moment it shoves, fading to 0
 } bean_look;
 
 typedef struct {
@@ -146,8 +148,8 @@ typedef struct {
 } particle;
 
 #define PARTICLES 512
-#define TAG_OTHERS 4      /* name tags besides our own */
-#define TAG_RADIUS 14.0f  /* how near another bean must be for its tag */
+#define TAG_OTHERS 4      // name tags besides our own
+#define TAG_RADIUS 14.0f  // how near another bean must be for its tag
 
 static Camera3D cam;
 static int cam_ready, last_focus, swinging;
@@ -158,17 +160,17 @@ static uint64_t last_frame_ms, start_ms, phase_seen_ms, count_seen_ms;
 static int last_phase = -1, phase_before = -1, last_count;
 #define LOOKS (HF_MAX_PLAYERS * 2)
 static bean_look looks[LOOKS];
-static uint8_t touching[LOOKS][LOOKS];  /* two beans in contact: bumped already */
-static float shake;                     /* the camera's jolt after we bump into someone, fading */
-static float fov_kick;                  /* the lens punches wider on a bump or a sprint, fading */
-static float my_sprint;                 /* our own bean's sprint, 0..1, for the lens */
+static uint8_t touching[LOOKS][LOOKS];  // two beans in contact: bumped already
+static float shake;                     // the camera's jolt after we bump into someone, fading
+static float fov_kick;                  // the lens punches wider on a bump or a sprint, fading
+static float my_sprint;                 // our own bean's sprint, 0..1, for the lens
 #define POPS 8
-static pop pops[POPS];                  /* "BONK!" where we bump into someone */
+static pop pops[POPS];                  // "BONK!" where we bump into someone
 static int pop_head;
 static particle parts[PARTICLES];
 static int part_head;
 static uint8_t seen_state[SIM_LAYERS][SIM_TILES];
-static const predict *pred;  /* this frame's, for the tiles */
+static const predict *pred;  // this frame's, for the tiles
 static int was_chase;
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -182,7 +184,7 @@ static Color player_color(const world *w, uint16_t id)
 
 static Color faded(Color c, float k) { return ColorAlpha(c, (float)c.a / 255.0f * clampf(k, 0, 1)); }
 
-/* ================================================================ setup */
+// ================================================================ setup
 
 static void put_triangle(float **v, float **n, Vector3 a, Vector3 b, Vector3 c, Vector3 normal)
 {
@@ -193,8 +195,8 @@ static void put_triangle(float **v, float **n, Vector3 a, Vector3 b, Vector3 c, 
     }
 }
 
-/* A hex tile with one normal per face, so each face gets a single shade.
- * A corner points along +z, as in the board's layout. */
+// A hex tile with one normal per face, so each face gets a single shade.
+// A corner points along +z, as in the board's layout.
 static Mesh hex_prism(float radius, float height)
 {
     Mesh m = {0};
@@ -251,7 +253,7 @@ static void build_body_font(void)
     body_loaded = 1;
 }
 
-/* Every character the HUD is about to show; new ones rebuild the atlas. */
+// Every character the HUD is about to show; new ones rebuild the atlas.
 static void need_text(const char *s)
 {
     while (*s) {
@@ -333,7 +335,7 @@ void render_close(void)
     UnloadShader(lit);
 }
 
-/* ================================================================ 3D */
+// ================================================================ 3D
 
 static void draw_mesh(Mesh m, Color c, Matrix t)
 {
@@ -386,8 +388,8 @@ static bean_look *look_for(uint16_t id, float facing)
     return slot;
 }
 
-/* The floor under a bean: the highest one at or below its feet, so the
- * camera starts moving down as soon as it falls through a hole. */
+// The floor under a bean: the highest one at or below its feet, so the
+// camera starts moving down as soon as it falls through a hole.
 static int floor_below(float y)
 {
     for (int layer = 0; layer < SIM_LAYERS; layer++)
@@ -396,7 +398,7 @@ static int floor_below(float y)
     return SIM_LAYERS - 1;
 }
 
-/* The floor to watch from above: the one most players stand on. */
+// The floor to watch from above: the one most players stand on.
 static int busiest_layer(const interp_view *v)
 {
     int count[SIM_LAYERS] = {0}, best = 0;
@@ -424,30 +426,30 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     float k = cam_ready ? 1.0f - expf(-dt * 2.2f) : 1.0f;
     focus_y += (SIM_LAYER_Y[focus] - focus_y) * k;
     for (int layer = 0; layer < SIM_LAYERS; layer++) {
-        float want = layer < focus ? 0.14f : 1.0f;  /* floors above the one we watch fade out */
+        float want = layer < focus ? 0.14f : 1.0f;  // floors above the one we watch fade out
         layer_alpha[layer] += (want - layer_alpha[layer]) * (cam_ready ? fminf(1, dt * 4) : 1.0f);
     }
 
-    /* What the camera circles around, how far back and up it sits, and how
-     * far past the centre it looks. */
+    // What the camera circles around, how far back and up it sits, and how
+    // far past the centre it looks.
     Vector3 centre = {0, focus_y, 0};
     float back = 40, up = 52, ahead = 4, look = -1, want_yaw = opt->yaw;
     if (chase) {
-        /* The mouse tilts it. It stays low enough to be under the floor
-         * above, so it comes closer to look down steeply. */
+        // The mouse tilts it. It stays low enough to be under the floor
+        // above, so it comes closer to look down steeply.
         centre = (Vector3){me->x, me->y, me->z};
         up = fminf(20 * sinf(opt->pitch), 11);
         back = up / tanf(opt->pitch);
         ahead = 3, look = 0.5f;
     } else if (w->phase == PHASE_LOBBY) {
-        back = 40, up = 46, ahead = 0, look = -8;  /* inside the ring of pillars */
-        want_yaw = t * 0.08f;                      /* a slow orbit while people get ready */
+        back = 40, up = 46, ahead = 0, look = -8;  // inside the ring of pillars
+        want_yaw = t * 0.08f;                      // a slow orbit while people get ready
     }
 
-    /* The angle is the player's (mouse or Q/E), and the keys are read
-     * relative to it, so it is used as is: what W means on screen and what
-     * is sent always agree. Only a big change (leaving the lobby's orbit)
-     * swings round smoothly. */
+    // The angle is the player's (mouse or Q/E), and the keys are read
+    // relative to it, so it is used as is: what W means on screen and what
+    // is sent always agree. Only a big change (leaving the lobby's orbit)
+    // swings round smoothly.
     float r = cam_ready ? 1.0f - expf(-dt * 3) : 1.0f;
     float turn = atan2f(sinf(want_yaw - cam_yaw), cosf(want_yaw - cam_yaw));
     if (fabsf(turn) > 0.35f)
@@ -456,8 +458,8 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
         swinging = 0;
     cam_yaw += swinging && cam_ready ? turn * r : turn;
 
-    /* A tilt with the mouse is used at once, like a turn; a change of view
-     * (chase, overview, lobby) glides. */
+    // A tilt with the mouse is used at once, like a turn; a change of view
+    // (chase, overview, lobby) glides.
     float glide = chase && was_chase ? 1.0f : r;
     was_chase = chase;
     cam_centre = cam_ready ? Vector3Lerp(cam_centre, centre, r) : centre;
@@ -468,8 +470,8 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     float sy = sinf(cam_yaw), cy = cosf(cam_yaw);
     cam.position = (Vector3){cam_centre.x + sy * cam_back, cam_centre.y + cam_up, cam_centre.z + cy * cam_back};
     cam.target = (Vector3){cam_centre.x - sy * cam_ahead, cam_centre.y + cam_look, cam_centre.z - cy * cam_ahead};
-    /* Wider while we sprint; a bump or breaking into a sprint punches it
-     * wider still for a moment. */
+    // Wider while we sprint; a bump or breaking into a sprint punches it
+    // wider still for a moment.
     static float lens = 45;
     float want_lens = chase ? 52 + 8 * my_sprint : 45;
     lens = cam_ready ? lens + (want_lens - lens) * r : want_lens;
@@ -483,9 +485,9 @@ static void update_camera(const world *w, const interp_view *v, const render_opt
     cam_ready = 1;
 }
 
-/* Tiles are drawn as they were at the moment the view shows. */
-/* A tile as it is drawn: the ones our bean has been on at our own moment,
- * the rest at the view's (predict.h). *since: ticks since it was touched. */
+// Tiles are drawn as they were at the moment the view shows.
+// A tile as it is drawn: the ones our bean has been on at our own moment,
+// the rest at the view's (predict.h). *since: ticks since it was touched.
 static int tile_state(const world *w, const interp_view *v, int layer, int index, sim_tile *t, float *since)
 {
     double at;
@@ -497,7 +499,7 @@ static int tile_state(const world *w, const interp_view *v, int layer, int index
 static void draw_tile(const world *w, const interp_view *v, int layer, int index, float alpha)
 {
     sim_tile tile;
-    float since;  /* ticks since it was touched */
+    float since;  // ticks since it was touched
     int state = tile_state(w, v, layer, index, &tile, &since);
     const sim_tile *t = &tile;
     int q, r;
@@ -507,7 +509,7 @@ static void draw_tile(const world *w, const interp_view *v, int layer, int index
     Color c = LAYER_COLORS[layer];
     Matrix spin = MatrixIdentity();
     if (state == TILE_TOUCHED) {
-        /* White at once, shaking harder as its moment comes. */
+        // White at once, shaking harder as its moment comes.
         float k = clampf(since / SIM_FALL_TICKS, 0, 1);
         c = TOUCHED;
         x += (rnd() - 0.5f) * 0.18f * k;
@@ -515,7 +517,7 @@ static void draw_tile(const world *w, const interp_view *v, int layer, int index
     } else if (state == TILE_GONE) {
         float s = (since - SIM_FALL_TICKS) / SIM_TICK_HZ;
         if (t->touch_tick == 0 || s < 0 || s > 0.8f)
-            return;  /* long gone, or gone before we joined */
+            return;  // long gone, or gone before we joined
         y -= 15.0f * s * s;
         spin = MatrixMultiply(MatrixRotateX(s * 1.5f), MatrixRotateZ(s * 0.8f));
     }
@@ -533,7 +535,7 @@ static void draw_floors(const world *w, const interp_view *v, int see_through)
     }
 }
 
-/* Crumbs when a tile goes, the first time we see it go. */
+// Crumbs when a tile goes, the first time we see it go.
 static void watch_tiles(const world *w, const interp_view *v)
 {
     for (int layer = 0; layer < SIM_LAYERS; layer++)
@@ -574,20 +576,20 @@ static void draw_shadow(const world *w, const interp_view *v, const world_body *
 static void draw_bean(const world_body *b, const bean_look *lk, Color color, float t)
 {
     float speed = sqrtf(b->vx * b->vx + b->vz * b->vz), k = lk->sprint;
-    /* Sprinting: leaning right into it, stretched out, the feet going twice as fast. */
+    // Sprinting: leaning right into it, stretched out, the feet going twice as fast.
     float lean = fminf(0.35f, speed * 0.04f) + 0.3f * k;
     float bob = b->grounded && speed > 1 ? fabsf(sinf(t * (14 + 12 * k) + b->x)) * (0.25f + 0.1f * k) : 0;
     Matrix stretch = MatrixScale(1 - 0.08f * k, 1 - 0.06f * k, 1 + 0.2f * k);
-    /* After a bump: squashed flat, wobbling back into shape, knocked back
-     * the way it was pushed, all the more the harder the bump. */
+    // After a bump: squashed flat, wobbling back into shape, knocked back
+    // the way it was pushed, all the more the harder the bump.
     float hard = fminf(lk->power, 1.3f);
     float wobble = lk->bump > 0 ? sinf((1 - lk->bump) * 3 * PI) * lk->bump * hard : 0;
     Matrix squash = MatrixScale(1 + 0.45f * wobble, 1 - 0.35f * wobble, 1 + 0.45f * wobble);
     Matrix knock = MatrixRotate((Vector3){lk->push_z, 0, -lk->push_x}, 0.7f * lk->bump * hard);
-    /* A dive: tipped forward about its middle, flat out and face down. */
+    // A dive: tipped forward about its middle, flat out and face down.
     Matrix tip = MatrixMultiply(MatrixMultiply(MatrixTranslate(0, -0.9f, 0), MatrixRotateX(1.45f * lk->lie)),
                                 MatrixTranslate(0, 0.9f, 0));
-    /* A shove: a lunge, the mitts punching out and back. */
+    // A shove: a lunge, the mitts punching out and back.
     float u = 1 - lk->shove, punch = lk->shove > 0 ? (u < 0.3f ? u / 0.3f : (1 - u) / 0.7f) : 0;
     Matrix lunge = MatrixMultiply(MatrixRotateX(0.35f * punch), MatrixTranslate(0, 0, 0.5f * punch));
     Matrix root = MatrixMultiply(MatrixMultiply(MatrixRotateY(lk->face), knock), MatrixTranslate(b->x, b->y, b->z));
@@ -606,7 +608,7 @@ static void draw_bean(const world_body *b, const bean_look *lk, Color color, flo
     for (int side = -1; side <= 1; side += 2) {
         draw_mesh(ball, WHITE, MatrixMultiply(at(0.32f * side, 1.78f, 0.7f, 0.24f, 0.24f, 0.24f), inner));
         draw_mesh(ball, PUPIL, MatrixMultiply(at(0.32f * side, 1.8f, 0.9f, 0.12f, 0.12f, 0.12f), inner));
-        if (punch > 0)  /* boxing mitts, out of nowhere, as cartoons do */
+        if (punch > 0)  // boxing mitts, out of nowhere, as cartoons do
             draw_mesh(ball, WHITE,
                       MatrixMultiply(at(0.62f * side * (1 - 0.4f * punch), 1.15f, 0.55f + 1.1f * punch, 0.36f, 0.36f, 0.42f),
                                      inner));
@@ -625,7 +627,7 @@ static void draw_crown(const world_body *b, float t)
 
 static void draw_arena(void)
 {
-    set_glow(SLIME);  /* the slime is lit by nothing but itself */
+    set_glow(SLIME);  // the slime is lit by nothing but itself
     draw_mesh(slime, BLACK, MatrixTranslate(0, SIM_SLIME_Y, 0));
     set_glow(BLANK);
     for (int k = 0; k < 12; k++) {
@@ -682,7 +684,7 @@ static void draw_world(const world *w, const interp_view *v, float t)
         }
     }
 
-    rlDisableDepthMask();  /* see-through floors and sparks do not hide what is behind them */
+    rlDisableDepthMask();  // see-through floors and sparks do not hide what is behind them
     if (w->have_board)
         draw_floors(w, v, 1);
     draw_particles();
@@ -690,7 +692,7 @@ static void draw_world(const world *w, const interp_view *v, float t)
     rlEnableDepthMask();
 }
 
-/* Beans turn smoothly, and a bean that just went into the slime splashes. */
+// Beans turn smoothly, and a bean that just went into the slime splashes.
 static void watch_beans(const world *w, const interp_view *v, float dt)
 {
     for (int i = 0; i < v->count; i++) {
@@ -698,12 +700,12 @@ static void watch_beans(const world *w, const interp_view *v, float dt)
         bean_look *lk = look_for(b->id, b->facing);
         float diff = atan2f(sinf(b->facing - lk->face), cosf(b->facing - lk->face));
         lk->face += diff * fminf(1, dt * 12);
-        /* A little behind: by the frame two beans are seen to touch, the
-         * server's push may already have slowed them down. */
+        // A little behind: by the frame two beans are seen to touch, the
+        // server's push may already have slowed them down.
         float lag = fminf(1, dt / 0.1f);
         lk->lag_vx += (b->vx - lk->lag_vx) * lag;
         lk->lag_vz += (b->vz - lk->lag_vz) * lag;
-        /* RESULT too: the last one to fall is shown a moment after the server ends the round. */
+        // RESULT too: the last one to fall is shown a moment after the server ends the round.
         if (lk->was_alive && !b->alive && (w->phase == PHASE_PLAYING || w->phase == PHASE_RESULT)) {
             Color colors[3] = {{217, 166, 255, 255}, SLIME, WHITE};
             burst(b->x, SIM_SLIME_Y + 0.5f, b->z, colors, 3, 22, 6);
@@ -729,11 +731,11 @@ static void ring(float x, float y, float z, int n, float speed, float life, floa
     }
 }
 
-/* Two beans that meet bump: both squash and flash, stars and a shock ring
- * fly where they touch, and if one of them is ours the camera jolts, the
- * lens punches and a word pops up. The faster they were going, the bigger
- * all of it. Judged from where the beans are drawn, so it happens where
- * the player sees them touch, whichever moment each one is drawn at. */
+// Two beans that meet bump: both squash and flash, stars and a shock ring
+// fly where they touch, and if one of them is ours the camera jolts, the
+// lens punches and a word pops up. The faster they were going, the bigger
+// all of it. Judged from where the beans are drawn, so it happens where
+// the player sees them touch, whichever moment each one is drawn at.
 static void watch_bumps(const world *w, const interp_view *v, float dt)
 {
     static const char *const words[] = {"BONK!", "BAM!", "POW!", "BOING!"};
@@ -758,8 +760,8 @@ static void watch_bumps(const world *w, const interp_view *v, float dt)
                 continue;
             *contact = 1;
             float nx = d > 0 ? dx / d : 1, nz = d > 0 ? dz / d : 0;
-            /* How fast they were closing in: a brush in passing is a nudge,
-             * running into someone standing about 1, head-on 1.6. */
+            // How fast they were closing in: a brush in passing is a nudge,
+            // running into someone standing about 1, head-on 1.6.
             float closing = (la->lag_vx - lb->lag_vx) * nx + (la->lag_vz - lb->lag_vz) * nz;
             float power = clampf(0.3f + closing / 9, 0.3f, 1.6f);
             bumped(la, -nx, -nz, power);
@@ -783,9 +785,9 @@ static void watch_bumps(const world *w, const interp_view *v, float dt)
         }
 }
 
-/* A bean that breaks into a sprint kicks up a ring of dust (and, if it is
- * ours, the lens widens); while it sprints, dust puffs under its feet and
- * the air streams past it. */
+// A bean that breaks into a sprint kicks up a ring of dust (and, if it is
+// ours, the lens widens); while it sprints, dust puffs under its feet and
+// the air streams past it.
 static void watch_sprints(const world *w, const interp_view *v, float dt)
 {
     const Color dust = {255, 238, 228, 255}, air = {255, 255, 255, 200};
@@ -826,11 +828,11 @@ static void watch_sprints(const world *w, const interp_view *v, float dt)
     }
 }
 
-/* Dives and shoves. A diving bean tips flat and the air streams past; it
- * lands with a splash of dust and slides on its belly, and gets up just
- * before it can move again. A shove: the mitts punch out, a fan of air
- * flies ahead, and whoever is in front, as drawn, is knocked back with
- * stars (and if it involves us, the camera jolts and a word pops up). */
+// Dives and shoves. A diving bean tips flat and the air streams past; it
+// lands with a splash of dust and slides on its belly, and gets up just
+// before it can move again. A shove: the mitts punch out, a fan of air
+// flies ahead, and whoever is in front, as drawn, is knocked back with
+// stars (and if it involves us, the camera jolts and a word pops up).
 static void watch_moves(const world *w, const interp_view *v, float dt)
 {
     static const char *const words[] = {"WHAM!", "SHOVE!", "OOF!"};
@@ -852,7 +854,7 @@ static void watch_moves(const world *w, const interp_view *v, float dt)
                 fov_kick += 4;
         }
         if (b->move == MOVE_DOWN && lk->was_move == MOVE_DIVE)
-            ring(b->x, b->y + 0.3f, b->z, 22, 7, 0.4f, 1.4f, dust);  /* belly flop */
+            ring(b->x, b->y + 0.3f, b->z, 22, 7, 0.4f, 1.4f, dust);  // belly flop
         if (speed > 1 && b->move == MOVE_DIVE && rnd() < dt * 50) {
             float fx = b->vx / speed, fz = b->vz / speed, side = (rnd() - 0.5f) * 1.8f;
             emit_sized(b->x + fz * side, b->y + 0.6f + rnd() * 0.8f, b->z - fx * side, -fx * 3, 1, -fz * 3, 0.2f, 0.5f, air);
@@ -865,7 +867,7 @@ static void watch_moves(const world *w, const interp_view *v, float dt)
         if (b->shoving && !lk->was_shoving) {
             lk->shove = 1;
             float fx = sinf(b->facing), fz = cosf(b->facing);
-            for (int k = 0; k < 11; k++) {  /* a fan of air, the width of the shove */
+            for (int k = 0; k < 11; k++) {  // a fan of air, the width of the shove
                 float a = ((float)k / 10 - 0.5f) * 2.4f, ax = fx * cosf(a) + fz * sinf(a), az = fz * cosf(a) - fx * sinf(a);
                 emit_sized(b->x + ax * 1.2f, b->y + 1.2f, b->z + az * 1.2f, ax * 9, 2, az * 9, 0.22f, 0.7f, air);
             }
@@ -890,7 +892,7 @@ static void watch_moves(const world *w, const interp_view *v, float dt)
     }
 }
 
-/* ================================================================ HUD */
+// ================================================================ HUD
 
 static Font display_face(void) { return display_loaded ? display_font : body_font; }
 
@@ -901,7 +903,7 @@ static void text(const char *s, float x, float y, float size, Color c)
 
 static float text_width(const char *s, float size) { return MeasureTextEx(body_font, s, size, size * 0.02f).x; }
 
-static void label(const char *s, float x, float y, float size, Color c)  /* small caps-style eyebrow */
+static void label(const char *s, float x, float y, float size, Color c)  // small caps-style eyebrow
 {
     DrawTextEx(display_face(), s, (Vector2){x, y}, size, size * 0.16f, c);
 }
@@ -944,7 +946,7 @@ static void triangle(Vector2 a, Vector2 b, Vector2 c, Color col)
 
 static void draw_crown_icon(float x, float y, float s)
 {
-    /* The crown from the prototype's results card, 64 x 48 units. */
+    // The crown from the prototype's results card, 64 x 48 units.
     static const float pts[7][2] = {{6, 40}, {10, 12}, {23, 25}, {32, 6}, {41, 25}, {54, 12}, {58, 40}};
     static const int tris[5][3] = {{0, 1, 2}, {2, 3, 4}, {4, 5, 6}, {0, 2, 4}, {0, 4, 6}};
     Vector2 p[7];
@@ -983,9 +985,9 @@ static void draw_tag(const world *w, const world_body *b)
     }
 }
 
-/* Our own tag always. Of the others only the few nearest to us (or, while
- * we watch, to where the camera looks), so that a full room stays
- * readable, plus the winner's once the round is over. */
+// Our own tag always. Of the others only the few nearest to us (or, while
+// we watch, to where the camera looks), so that a full room stays
+// readable, plus the winner's once the round is over.
 static void draw_tags(const world *w, const interp_view *v)
 {
     const world_body *me = interp_body(v, w->me);
@@ -1000,7 +1002,7 @@ static void draw_tags(const world *w, const interp_view *v)
             continue;
         float dx = b->x - from.x, dz = b->z - from.z, d = sqrtf(dx * dx + dz * dz);
         if (w->phase == PHASE_RESULT && p->place == 1)
-            d = -1;  /* first in line */
+            d = -1;  // first in line
         else if (d > TAG_RADIUS || fabsf(b->y - from.y) > 6)
             continue;
         int k = n++;
@@ -1014,10 +1016,10 @@ static void draw_tags(const world *w, const interp_view *v)
     for (int k = 0; k < n && k < TAG_OTHERS; k++)
         draw_tag(w, &v->bodies[pick[k]]);
     if (alive_me)
-        draw_tag(w, me);  /* last, on top */
+        draw_tag(w, me);  // last, on top
 }
 
-/* The word over a bump of ours: in big, then rising and fading. */
+// The word over a bump of ours: in big, then rising and fading.
 static void draw_pops(float dt)
 {
     for (int i = 0; i < POPS; i++) {
@@ -1030,7 +1032,7 @@ static void draw_pops(float dt)
         if (p->life <= 0 || !in_front(at3))
             continue;
         Vector2 s = GetWorldToScreen(at3, cam);
-        float grow = 1 + 0.8f * clampf(1 - age * 10, 0, 1);  /* in big, settles at once */
+        float grow = 1 + 0.8f * clampf(1 - age * 10, 0, 1);  // in big, settles at once
         float size = (34 + 26 * p->size) * grow;
         big(p->word, s.x, s.y, size, faded(WHITE, p->life * 4), faded(SIGNAL, p->life * 4));
     }
@@ -1052,13 +1054,13 @@ static void draw_alive(const interp_view *v)
 static void draw_feed(const world *w, const interp_view *v, uint64_t now_ms)
 {
     float right = (float)GetScreenWidth() - 16, y = 16;
-    for (int i = w->note_count - 1; i >= 0; i--) {  /* newest on top */
+    for (int i = w->note_count - 1; i >= 0; i--) {  // newest on top
         const world_note *n = &w->notes[i];
         float age = (float)(now_ms - n->at_ms) / 1000.0f, a = clampf((5.0f - age) / 0.5f, 0, 1);
-        /* Our own knock-out is on our own moment (predict.h), the others' on the view's. */
+        // Our own knock-out is on our own moment (predict.h), the others' on the view's.
         double moment = n->player == w->me && pred->shown_valid ? pred->shown_tick : v->tick;
         if (age > 5.0f || (n->knockout && moment < (double)n->tick))
-            continue;  /* faded, or the bean has not reached the slime on screen yet */
+            continue;  // faded, or the bean has not reached the slime on screen yet
         float size = 15, h = 26;
         if (n->knockout) {
             const world_player *p = world_player_by_id(w, n->player);
@@ -1116,7 +1118,7 @@ static void draw_result(const world *w, uint64_t now_ms)
 {
     float since = (float)(now_ms - phase_seen_ms) / 1000.0f;
     if (since < 1.2f)
-        return;  /* first a moment to see the winner with the crown */
+        return;  // first a moment to see the winner with the crown
     const world_player *winner = NULL, *me = world_player_by_id(w, w->me);
     for (int i = 0; i < w->player_count; i++)
         if (w->players[i].place == 1)
@@ -1142,7 +1144,7 @@ static void draw_result(const world *w, uint64_t now_ms)
     card(x, y, bw, bh);
     draw_crown_icon(sw / 2 - 32, y + 22, 1);
     text(title, (sw - text_width(title, 26)) / 2, y + 86, 26, FG);
-    text(title, (sw - text_width(title, 26)) / 2 + 0.7f, y + 86, 26, FG);  /* a touch bolder */
+    text(title, (sw - text_width(title, 26)) / 2 + 0.7f, y + 86, 26, FG);  // a touch bolder
     text(sub, (sw - text_width(sub, 16)) / 2, y + 126, 16, MUTED);
     text(next, (sw - text_width(next, 14)) / 2, y + 158, 14, MUTED);
 }
@@ -1154,13 +1156,13 @@ static void pill(const char *s, float y, Color bg, Color fg)
     text(s, ((float)GetScreenWidth() - tw) / 2, y + 7, size, fg);
 }
 
-/* What our bean can do right now: shove (it fills up again in a second)
- * and dive (not while diving or lying down). */
+// What our bean can do right now: shove (it fills up again in a second)
+// and dive (not while diving or lying down).
 static void draw_moves(const sim_body *b, float cx, float y)
 {
     struct {
         const char *name;
-        float ready;  /* 0..1 */
+        float ready;  // 0..1
     } moves[2] = {
         {"SHOVE", b->move != MOVE_NONE ? 0 : 1 - (float)b->shove_cooldown / SIM_SHOVE_COOLDOWN},
         {"DIVE", b->move == MOVE_NONE ? 1 : 0},
@@ -1178,8 +1180,8 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
                      uint64_t now_ms)
 {
     float sw = (float)GetScreenWidth(), sh = (float)GetScreenHeight();
-    /* Whether we play this round is the newest news; whether we are out is
-     * what the screen shows. */
+    // Whether we play this round is the newest news; whether we are out is
+    // what the screen shows.
     const world_body *in_round = world_body_by_id(w, w->me), *me = interp_body(v, w->me);
 
     switch (w->phase) {
@@ -1204,13 +1206,13 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
         float since = (float)(now_ms - phase_seen_ms) / 1000.0f;
         if (phase_before == PHASE_COUNTDOWN && since < 0.8f)
             big("GO!", sw / 2, sh * 0.32f, 150 * (1 + 0.3f * clampf(1 - since * 4, 0, 1)), AMBER, AMBER_INK);
-        /* The floor holds for the first moment of a round (phase_end_tick). */
+        // The floor holds for the first moment of a round (phase_end_tick).
         double now_tick = pred && pred->shown_valid ? pred->shown_tick : (double)w->tick;
         double hold = ((double)w->phase_end_tick - now_tick) / SIM_TICK_HZ;
         if (in_round && hold > 0) {
             char s[48];
             snprintf(s, sizeof s, "The floor holds for %d s", (int)ceil(hold));
-            pill(s, fmaxf(64, sh * 0.32f - 130), AMBER, AMBER_INK);  /* above GO!, clear of our tag */
+            pill(s, fmaxf(64, sh * 0.32f - 130), AMBER, AMBER_INK);  // above GO!, clear of our tag
         }
         if (!in_round)
             pill("Watching - you join the next round", sh - 110, BOOTH, FG);
@@ -1243,9 +1245,9 @@ static void draw_hud(const world *w, const interp_view *v, const net_status *st,
     text(keys, sw - kw - 25, sh - 34, 13, FG);
 }
 
-/* The screen has stopped and waits for snapshots (interp.h): a spinner
- * where the connection's own notices go. Faded in, so that a short wait
- * does not flash. */
+// The screen has stopped and waits for snapshots (interp.h): a spinner
+// where the connection's own notices go. Faded in, so that a short wait
+// does not flash.
 static void draw_waiting(const interp *ip, float t)
 {
     float a = clampf(((float)ip->waiting_ms - 100) / 200, 0, 1);
@@ -1287,8 +1289,8 @@ static void draw_network_panel(const world *w, const interp *ip, const predict *
                  ip->guess_error_sum / (double)ip->guess_errors, ip->guess_error_max);
     else
         snprintf(lines[6], sizeof lines[6], "Guess  %s   nothing guessed yet", interp_guess_name(ip->guess));
-    /* Without prediction a press shows once the server has used it (the
-     * inputs ahead of it) and the snapshot has waited its turn on screen. */
+    // Without prediction a press shows once the server has used it (the
+    // inputs ahead of it) and the snapshot has waited its turn on screen.
     double felt = pr->ahead * 1000.0 / SIM_TICK_HZ + ip->delay_ms;
     if (!pr->enabled)
         snprintf(lines[7], sizeof lines[7], "Prediction  off: your moves show after ~%.0f ms", felt);
@@ -1317,13 +1319,13 @@ static void draw_network_panel(const world *w, const interp *ip, const predict *
         text(lines[i], 28, y + 28 + (float)i * row, size, FG);
 }
 
-/* ================================================================ frame */
+// ================================================================ frame
 
 void render_frame(const world *w, const interp *ip, const predict *pr, const net_status *st,
                   const render_options *opt, uint64_t now_ms)
 {
-    /* The others as the interpolation shows them, our own bean and the
-     * others near it as the prediction has them. */
+    // The others as the interpolation shows them, our own bean and the
+    // others near it as the prediction has them.
     static interp_view scene;
     predict_scene(pr, w, &ip->view, &scene);
     pred = pr;

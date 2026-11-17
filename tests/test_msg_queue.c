@@ -6,9 +6,11 @@
 
 #include "msg_queue.h"
 
-/* One producer thread, one consumer thread, as between the network thread
- * and the main thread. Run under `make tsan` to have ThreadSanitizer check
- * that every shared access is protected. */
+///////////////////////////////////////////////////////////////////////////////////
+// One producer thread, one consumer thread, as between the network thread
+// and the main thread. Run under `make tsan` to have ThreadSanitizer check
+// that every shared access is protected.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -23,7 +25,7 @@
 static mq_fifo fifo;
 static mq_ring ring;
 
-/* Item k is 8 + k % 200 bytes long and starts with k. */
+// Item k is 8 + k % 200 bytes long and starts with k.
 static size_t make_item(uint8_t *buf, uint64_t k)
 {
     size_t len = 8 + (size_t)(k % 200);
@@ -39,7 +41,7 @@ static void *fifo_producer(void *arg)
     for (uint64_t k = 0; k < COUNT; k++) {
         size_t len = make_item(buf, k);
         while (mq_fifo_push(&fifo, buf, len, k) != 0)
-            sched_yield();  /* full: the consumer will catch up */
+            sched_yield();  // full: the consumer will catch up
     }
     return NULL;
 }
@@ -67,7 +69,7 @@ static void test_fifo(size_t cap)
         for (size_t i = 0; i < n; i++, expect++) {
             uint64_t k;
             memcpy(&k, out[i].data, sizeof k);
-            CHECK(k == expect);  /* nothing lost, duplicated or reordered */
+            CHECK(k == expect);  // nothing lost, duplicated or reordered
             CHECK(out[i].at_ms == expect && out[i].len == 8 + expect % 200);
             CHECK(out[i].len == 8 || out[i].data[out[i].len - 1] == (uint8_t)(expect & 0xFF));
         }
@@ -92,7 +94,7 @@ static void test_ring(void)
         for (size_t i = 0; i < n; i++) {
             uint64_t k;
             memcpy(&k, out[i].data, sizeof k);
-            CHECK(!have_last || k > last);  /* always newer, even when items were skipped */
+            CHECK(!have_last || k > last);  // always newer, even when items were skipped
             last = k;
             have_last = 1;
             seen++;
@@ -111,7 +113,7 @@ static void test_ring(void)
 
 int main(void)
 {
-    test_fifo(1);  /* the tightest case: every push waits for a pop */
+    test_fifo(1);  // the tightest case: every push waits for a pop
     test_fifo(64);
     test_ring();
     printf("msg_queue: all checks passed\n");

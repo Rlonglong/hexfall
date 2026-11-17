@@ -7,14 +7,16 @@
 #include "interp.h"
 #include "predict.h"
 
-/* Prediction against a server and a network of the test's own. The server
- * plays by the room's rules: our player with the same input queue
- * (input_queue.c), maybe one other player holding a fixed stick, the same
- * physics (sim.c) including pushing players apart, tiles that fall, and a
- * snapshot after every tick, encoded and decoded as on the wire. The
- * network delays, jitters (so reorders) and loses packets both ways. The
- * client sends an input every tick and draws at 60 Hz. Time is simulated,
- * in steps of 1 ms, so nothing depends on how busy the machine is. */
+///////////////////////////////////////////////////////////////////////////////////
+// Prediction against a server and a network of the test's own. The server
+// plays by the room's rules: our player with the same input queue
+// (input_queue.c), maybe one other player holding a fixed stick, the same
+// physics (sim.c) including pushing players apart, tiles that fall, and a
+// snapshot after every tick, encoded and decoded as on the wire. The
+// network delays, jitters (so reorders) and loses packets both ways. The
+// client sends an input every tick and draws at 60 Hz. Time is simulated,
+// in steps of 1 ms, so nothing depends on how busy the machine is.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define CHECK(cond)                                                                \
     do {                                                                           \
@@ -25,14 +27,14 @@
     } while (0)
 
 #define ME 7
-#define OTHER 3  /* comes first in the server's order */
+#define OTHER 3  // comes first in the server's order
 #define TICK_MS (1000.0 / SIM_TICK_HZ)
 #define FRAME_MS (1000.0 / 60)
 #define FLIGHT 4096
 
 typedef struct {
     double at;
-    int kind;  /* 0 snapshot, 1 tile touched, 2 input */
+    int kind;  // 0 snapshot, 1 tile touched, 2 input
     world_snapshot snap;
     tile_ref tile;
     uint32_t tick;
@@ -53,20 +55,20 @@ static struct {
     sim_arena arena;
     uint32_t tick;
     double next_ms;
-    uint32_t push_at;  /* the tick something bumps the player aside, 0 = never */
-    int no_falls;      /* tiles never fall (and nobody hears of touches): standing still is safe */
+    uint32_t push_at;  // the tick something bumps the player aside, 0 = never
+    int no_falls;      // tiles never fall (and nobody hears of touches): standing still is safe
 } S;
 
 static world w;
 static predict pr;
 
-/* The client's keys: what the next input will be. */
+// The client's keys: what the next input will be.
 static input_sample keys, history[HF_INPUT_REDUNDANCY];
 static int history_n, wander, turn;
 static double next_input_ms, last_input_ms, next_frame_ms;
 static uint64_t used_seen;
 
-/* Measured on every frame. */
+// Measured on every frame.
 static float last_x, last_z, largest_step;
 static int have_last, frames_on_solid, frames_checked;
 
@@ -83,7 +85,7 @@ static int16_t fixed(float v) { return (int16_t)lrintf(v * HF_POS_SCALE); }
 static void on_touch(void *ctx, int layer, int q, int r)
 {
     (void)ctx;
-    /* Tile news travels on the reliable channel: late, maybe, but never lost. */
+    // Tile news travels on the reliable channel: late, maybe, but never lost.
     if (!S.no_falls && ndown < FLIGHT)
         down[ndown++] = (packet){.at = arrival(), .kind = 1, .tile = {(uint8_t)layer, (int8_t)q, (int8_t)r},
                                  .tick = S.tick};
@@ -121,7 +123,7 @@ static void server_tick(void)
     sim_shoves(alive, n);
     sim_separate(alive, n);
     if (S.tick == S.push_at)
-        S.body.x += 1.5f;  /* as if something we cannot know of had shoved us */
+        S.body.x += 1.5f;  // as if something we cannot know of had shoved us
     if (!S.no_falls)
         sim_arena_tick(&S.arena, S.tick);
 
@@ -141,8 +143,8 @@ static void server_tick(void)
     }
 }
 
-/* The player: a while one way, then another, now and then standing,
- * jumping, diving or shoving, kept near the middle of the top floor. */
+// The player: a while one way, then another, now and then standing,
+// jumping, diving or shoving, kept near the middle of the top floor.
 static void choose_keys(void)
 {
     keys.buttons = 0;
@@ -178,8 +180,8 @@ static void client_input(void)
     choose_keys();
 }
 
-/* What a player would see go wrong: a tile under our bean still drawn
- * as never touched, or the bean moving further in one frame than it can. */
+// What a player would see go wrong: a tile under our bean still drawn
+// as never touched, or the bean moving further in one frame than it can.
 static void client_frame(void)
 {
     predict_frame(&pr, &w, &keys, (now - last_input_ms) / TICK_MS, FRAME_MS);
@@ -247,8 +249,8 @@ static void run(double seconds)
     }
 }
 
-/* A round on a fresh board, the player in the middle of the top floor.
- * The lobby before it took a while, so the server's ack is from long ago. */
+// A round on a fresh board, the player in the middle of the top floor.
+// The lobby before it took a while, so the server's ack is from long ago.
 static void start(double delay, double jitter, double lost, int moving, int falls)
 {
     nup = ndown = 0;
@@ -274,14 +276,14 @@ static void start(double delay, double jitter, double lost, int moving, int fall
     wander = moving;
     turn = 0;
     S.next_ms = now + 3;
-    next_input_ms = now + 14;  /* the client's ticks are not the server's */
+    next_input_ms = now + 14;  // the client's ticks are not the server's
     next_frame_ms = now;
     largest_step = 0;
     have_last = frames_on_solid = frames_checked = 0;
 }
 
-/* Over several rounds: standing still is not an option in this game, so
- * a round ends with a fall into the slime sooner or later. */
+// Over several rounds: standing still is not an option in this game, so
+// a round ends with a fall into the slime sooner or later.
 static struct {
     uint64_t snapshots, corrections;
     double sum, max;
@@ -308,7 +310,7 @@ static void rounds(int n, double seconds, double delay, double jitter, double lo
     frames_on_solid = on_solid;
 }
 
-/* Another player, holding the stick one way all along. */
+// Another player, holding the stick one way all along.
 static void add_other(float x, float z, float mx, float mz)
 {
     S.has_other = 1;
@@ -331,16 +333,16 @@ static void report(const char *what)
 
 int main(void)
 {
-    /* The round starts with an ack from before it: no predicting from that.
-     * Once the server uses the first input of the round, it starts. */
+    // The round starts with an ack from before it: no predicting from that.
+    // Once the server uses the first input of the round, it starts.
     start(25, 0, 0, 0, 0);
     run(0.04);
     CHECK(w.have_snapshot && !pr.active && !pr.shown_valid);
     run(0.3);
     CHECK(pr.active && pr.shown_valid && pr.ahead >= 1 && pr.ahead <= 4);
 
-    /* A press shows on the very next frame, long before the server could
-     * say so: standing still, then W halfway between two input ticks. */
+    // A press shows on the very next frame, long before the server could
+    // say so: standing still, then W halfway between two input ticks.
     run(0.5);
     while (next_input_ms - now > TICK_MS / 2)
         run(0.001);
@@ -352,11 +354,11 @@ int main(void)
     run(1);
     CHECK(pr.corrections == 0);
 
-    /* A perfect network: the server does what was predicted, through runs,
-     * turns, jumps and falls. Positions travel rounded to 1/100, so now and
-     * then one of the two beans is just over the edge of a hole and the
-     * other is not, and one starts to fall a tick before the other; nothing
-     * else is ever corrected. Tiles under our bean are lit at once. */
+    // A perfect network: the server does what was predicted, through runs,
+    // turns, jumps and falls. Positions travel rounded to 1/100, so now and
+    // then one of the two beans is just over the edge of a hole and the
+    // other is not, and one starts to fall a tick before the other; nothing
+    // else is ever corrected. Tiles under our bean are lit at once.
     rounds(6, 10, 25, 0, 0);
     report("perfect network, 50 ms RTT:");
     CHECK(total.snapshots > 1000);
@@ -364,19 +366,19 @@ int main(void)
     CHECK(frames_checked > 1000 && frames_on_solid == 0);
     CHECK(largest_step < SIM_SPRINT_SPEED * FRAME_MS / 1000 * 1.25f);
 
-    /* A bad network: inputs come late or bunched up, so the server
-     * sometimes has to reuse the old stick or skip inputs, and the
-     * prediction is off; if that happens as we jump, for the whole jump,
-     * since nothing steers in the air. Corrections are smoothed out: the
-     * bean never jumps on screen. */
+    // A bad network: inputs come late or bunched up, so the server
+    // sometimes has to reuse the old stick or skip inputs, and the
+    // prediction is off; if that happens as we jump, for the whole jump,
+    // since nothing steers in the air. Corrections are smoothed out: the
+    // bean never jumps on screen.
     rounds(8, 10, 30, 60, 0.05);
     report("30-90 ms each way, 5% lost:");
     CHECK(total.snapshots > 1000 && total.corrections > 0);
     CHECK(total.sum / (double)total.corrections < 0.5);
     CHECK(largest_step < 0.4f);
 
-    /* A shove the client could not know about: one big correction, shown
-     * as a quick slide, not a jump. */
+    // A shove the client could not know about: one big correction, shown
+    // as a quick slide, not a jump.
     start(25, 0, 0, 0, 0);
     run(1);
     S.push_at = S.tick + 10;
@@ -385,9 +387,9 @@ int main(void)
     CHECK(pr.corrections == 1 && pr.correction_max > 1.4 && pr.correction_max < 1.6);
     CHECK(largest_step < 0.4f && fabsf(pr.shown.x - S.body.x) < 0.05f);
 
-    /* Running into another player. The client plays the bump itself, the
-     * other player included, so what the server does next was foreseen:
-     * no correction, though we are pushed and push. */
+    // Running into another player. The client plays the bump itself, the
+    // other player included, so what the server does next was foreseen:
+    // no correction, though we are pushed and push.
     start(25, 0, 0, 0, 0);
     add_other(0, -6, 0, 0);
     run(0.5);
@@ -403,8 +405,8 @@ int main(void)
     CHECK(pr.correction_max < 0.25);
     CHECK(pr.other_count == 1 && fabsf(pr.others[0].body.z - S.other.z) < 0.5f);
 
-    /* Head-on into a player running at us: the guess has it keep running,
-     * which it does, so this bump is foreseen too. */
+    // Head-on into a player running at us: the guess has it keep running,
+    // which it does, so this bump is foreseen too.
     start(25, 0, 0, 0, 0);
     add_other(0, -12, 0, 1);
     run(0.3);
@@ -419,9 +421,9 @@ int main(void)
     CHECK(closest < 2 * SIM_BODY_RADIUS + 0.05f);
     CHECK(pr.correction_max < 0.5);
 
-    /* A dive of ours, on a perfect network: under way on screen before the
-     * server has the input, and then the server does exactly what was
-     * predicted, the flight, the slide on the belly and getting up. */
+    // A dive of ours, on a perfect network: under way on screen before the
+    // server has the input, and then the server does exactly what was
+    // predicted, the flight, the slide on the belly and getting up.
     start(25, 0, 0, 0, 0);
     run(0.5);
     keys.mz = 127;
@@ -442,12 +444,12 @@ int main(void)
     CHECK(dived_first && saw_down && S.body.move == MOVE_NONE);
     CHECK(pr.corrections == before_dive);
 
-    /* Our shove: the player in front flies on our screen before the server
-     * has even heard of it, and lands where the server puts it. */
+    // Our shove: the player in front flies on our screen before the server
+    // has even heard of it, and lands where the server puts it.
     start(25, 0, 0, 0, 0);
     add_other(0, 2.4f, 0, 0);
     run(0.5);
-    keys.mz = 127;  /* aimed with the stick; let go once the shove is sent */
+    keys.mz = 127;  // aimed with the stick; let go once the shove is sent
     keys.buttons = BTN_SHOVE;
     float other_z = S.other.z;
     int flew_first = 0;
@@ -462,8 +464,8 @@ int main(void)
     CHECK(flew_first && S.other.z > other_z + 2.5f);
     CHECK(fabsf(pr.others[0].body.z - S.other.z) < 0.05f && fabsf(pr.others[0].body.x - S.other.x) < 0.05f);
 
-    /* Shoved by somebody else: nobody could have seen it coming, so it is
-     * corrected, smoothly, never a jump on screen. */
+    // Shoved by somebody else: nobody could have seen it coming, so it is
+    // corrected, smoothly, never a jump on screen.
     start(25, 0, 0, 0, 0);
     add_other(0, -2.4f, 0, 0);
     run(0.5);
@@ -480,8 +482,8 @@ int main(void)
     CHECK(S.body.z > my_z + 2.5f);
     CHECK(largest_step < 0.45f);
 
-    /* Standing still until the tile gives way: the tile is drawn gone on
-     * the very frame our bean starts to fall, not `delay` ms later. */
+    // Standing still until the tile gives way: the tile is drawn gone on
+    // the very frame our bean starts to fall, not `delay` ms later.
     start(60, 0, 0, 0, 1);
     int q, r, fell_on_gone = -1;
     sim_world_tile(0, 0, &q, &r);
@@ -496,11 +498,11 @@ int main(void)
     }
     CHECK(fell_on_gone == 1);
 
-    /* The floor holds at the start of a round: standing still, the tile
-     * under our bean is not drawn lit while our present is before the
-     * board is armed (the server says when), and is lit from the tick it
-     * is, as on the server. Our present is ahead of the server's, so it is
-     * lit on screen a little before the server gets there. */
+    // The floor holds at the start of a round: standing still, the tile
+    // under our bean is not drawn lit while our present is before the
+    // board is armed (the server says when), and is lit from the tick it
+    // is, as on the server. Our present is ahead of the server's, so it is
+    // lit on screen a little before the server gets there.
     start(60, 0, 0, 0, 1);
     uint32_t armed = S.tick + 45;
     S.arena.armed_tick = w.arena.armed_tick = armed;

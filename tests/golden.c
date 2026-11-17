@@ -4,10 +4,12 @@
 #include "protocol.h"
 #include "sim.h"
 
-/* Writes one of every message with known values. tests/test_protocol_js.mjs
- * decodes the file with web/protocol.js and compares field by field, and
- * re-encodes the client messages to compare byte by byte. Change a message
- * here and there together. */
+///////////////////////////////////////////////////////////////////////////////////
+// Writes one of every message with known values. tests/test_protocol_js.mjs
+// decodes the file with web/protocol.js and compares field by field, and
+// re-encodes the client messages to compare byte by byte. Change a message
+// here and there together.
+///////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char **argv)
 {
@@ -64,9 +66,9 @@ int main(int argc, char **argv)
     tiles.tick = 1003;
     tiles.layers = SIM_LAYERS;
     tiles.ring = SIM_RING;
-    tiles.gone_bytes = (SIM_LAYERS * SIM_TILES + 7) / 8;  /* 651 bits -> 82 bytes */
-    tiles.gone[0] = 0x80;                                 /* tile 0 of layer 0 is gone */
-    tiles.gone[tiles.gone_bytes - 1] = 0x20;              /* bit 650, the last tile of layer 2 */
+    tiles.gone_bytes = (SIM_LAYERS * SIM_TILES + 7) / 8;  // 651 bits -> 82 bytes
+    tiles.gone[0] = 0x80;                                 // tile 0 of layer 0 is gone
+    tiles.gone[tiles.gone_bytes - 1] = 0x20;              // bit 650, the last tile of layer 2
     tiles.touched_count = 1;
     tiles.touched[0] = (touched_tile){.t = {.layer = 1, .q = 3, .r = -2}, .touch_tick = 1000};
     hf_put_tiles(&w, &tiles);

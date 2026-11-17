@@ -10,7 +10,7 @@
 #include "server.h"
 #include "util.h"
 
-#define FLUSH_MAX_PACKETS 4  /* per connection per tick, when there is a backlog */
+#define FLUSH_MAX_PACKETS 4  // per connection per tick, when there is a backlog
 
 static conn conns[MAX_CONNS];
 static struct {
@@ -19,8 +19,8 @@ static struct {
 
 int udp_open(uint16_t port)
 {
-    /* Dual-stack when the OS allows it: IPv6 clients directly, IPv4 ones as
-     * ::ffff:a.b.c.d mapped addresses. Falls back to plain IPv4. */
+    // Dual-stack when the OS allows it: IPv6 clients directly, IPv4 ones as
+    // ::ffff:a.b.c.d mapped addresses. Falls back to plain IPv4.
     int fd = socket(AF_INET6, SOCK_DGRAM, 0);
     if (fd >= 0) {
         int off = 0;
@@ -104,8 +104,8 @@ static conn *find_by_token(uint64_t token)
     return NULL;
 }
 
-/* A client that has not received WELCOME yet sends session 0, so until then
- * its packets are matched by address. */
+// A client that has not received WELCOME yet sends session 0, so until then
+// its packets are matched by address.
 static conn *find_pending(const struct sockaddr_storage *from)
 {
     for (int i = 0; i < MAX_CONNS; i++)
@@ -176,7 +176,7 @@ static void deliver(void *ctx, const uint8_t *msg, size_t len)
         return;
     room_on_message(d->c, type, &payload, d->now_ms);
     if (type == MSG_PING)
-        d->c->flush_now = 1;  /* the PONG is stamped now, so it must leave now */
+        d->c->flush_now = 1;  // the PONG is stamped now, so it must leave now
 }
 
 static void flush_conn(int fd, conn *c, uint64_t now_ms);
@@ -205,12 +205,12 @@ static void handle_datagram(int fd, const uint8_t *buf, size_t n, const struct s
     } else {
         c = find_by_token(session);
         if (!c) {
-            stats.stale++;  /* a session we no longer know: the client must start over */
+            stats.stale++;  // a session we no longer know: the client must start over
             return;
         }
         c->token_confirmed = 1;
         if (!same_addr(&c->addr, from)) {
-            /* NAT rebinding or a network switch: the token proves who it is. */
+            // NAT rebinding or a network switch: the token proves who it is.
             char before[64];
             snprintf(before, sizeof before, "%s", conn_addr_str(c));
             memcpy(&c->addr, from, from_len);
@@ -237,15 +237,15 @@ void udp_receive(int fd, uint64_t now_ms)
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            return;  /* EAGAIN: drained */
+            return;  // EAGAIN: drained
         }
         stats.rx++;
         handle_datagram(fd, buf, (size_t)n, &from, from_len, now_ms);
     }
 }
 
-/* At least one packet, which carries acks and doubles as a heartbeat; more
- * while there is a backlog. Unreliable messages that did not fit are dropped. */
+// At least one packet, which carries acks and doubles as a heartbeat; more
+// while there is a backlog. Unreliable messages that did not fit are dropped.
 static void flush_conn(int fd, conn *c, uint64_t now_ms)
 {
     for (int k = 0; k < FLUSH_MAX_PACKETS; k++) {

@@ -47,13 +47,13 @@ void hf_clean_name(char *s)
         n = HF_NAME_MAX;
     s[n] = 0;
 
-    /* If the last character's bytes were cut off, drop the rest of it too. */
+    // If the last character's bytes were cut off, drop the rest of it too.
     size_t start = n;
     while (start > 0 && ((unsigned char)s[start - 1] & 0xC0) == 0x80)
         start--;
     if (start == 0) {
         if (n > 0 && ((unsigned char)s[0] & 0xC0) == 0x80)
-            s[0] = 0;  /* nothing but continuation bytes */
+            s[0] = 0;  // nothing but continuation bytes
         return;
     }
     unsigned char lead = (unsigned char)s[start - 1];
@@ -62,13 +62,13 @@ void hf_clean_name(char *s)
         s[start - 1] = 0;
 }
 
-/* ---- framing ---- */
+// ---- framing ----
 
 static size_t msg_begin(wbuf *w, uint8_t type)
 {
     wb_u8(w, type);
     size_t at = w->len;
-    wb_u16(w, 0);  /* patched by msg_end */
+    wb_u16(w, 0);  // patched by msg_end
     return at;
 }
 
@@ -97,7 +97,7 @@ int hf_next_msg(rbuf *r, uint8_t *type, rbuf *payload)
 
 static uint8_t cap_u8(unsigned v, unsigned max) { return (uint8_t)(v > max ? max : v); }
 
-/* ---- client -> server ---- */
+// ---- client -> server ----
 
 void hf_put_hello(wbuf *w, const msg_hello *m)
 {
@@ -183,7 +183,7 @@ int hf_get_bye(rbuf *p, msg_bye *m)
     return !p->error;
 }
 
-/* ---- server -> client ---- */
+// ---- server -> client ----
 
 void hf_put_welcome(wbuf *w, const msg_welcome *m)
 {
@@ -406,7 +406,7 @@ int hf_get_error(rbuf *p, msg_error *m)
     return !p->error;
 }
 
-/* ---- UDP envelope ---- */
+// ---- UDP envelope ----
 
 void hf_put_udp_header(wbuf *w, uint64_t session)
 {

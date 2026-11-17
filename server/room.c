@@ -7,18 +7,20 @@
 #include "sim.h"
 #include "util.h"
 
-/* The room: one lobby and one game at a time. The server is the only one
- * who decides where everybody is, which tile fell and who is out; clients
- * send inputs and draw what they are told.
- *
- *   LOBBY --(enough players, all ready)--> COUNTDOWN --(3 s)--> PLAYING
- *     ^                                       |                    |
- *     +------(someone left or un-readied)-----+      (one left) RESULT --(5 s)--> LOBBY
- *
- * For the first START_GRACE_TICKS of a round the floor holds (the arena's
- * armed_tick): everybody can find their feet before tiles start to fall.
- * The ROOM message's phase_end_tick says when, while PLAYING. Back in the
- * lobby the board is whole again, so the countdown shows the next round's. */
+///////////////////////////////////////////////////////////////////////////////////
+// The room: one lobby and one game at a time. The server is the only one
+// who decides where everybody is, which tile fell and who is out; clients
+// send inputs and draw what they are told.
+//
+//       LOBBY --(enough players, all ready)--> COUNTDOWN --(3 s)--> PLAYING
+//         ^                                       |                    |
+//         +------(someone left or un-readied)-----+      (one left) RESULT --(5 s)--> LOBBY
+//
+//     For the first START_GRACE_TICKS of a round the floor holds (the arena's
+//     armed_tick): everybody can find their feet before tiles start to fall.
+//     The ROOM message's phase_end_tick says when, while PLAYING. Back in the
+//     lobby the board is whole again, so the countdown shows the next round's.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define TICK_HZ SIM_TICK_HZ
 #define COUNTDOWN_TICKS (3 * TICK_HZ)
@@ -32,11 +34,11 @@ typedef struct {
     uint64_t token;
     char name[HF_NAME_MAX + 1];
     uint8_t color, kind;
-    conn *c;          /* NULL while disconnected; the slot waits RECONNECT_GRACE_MS */
+    conn *c;          // NULL while disconnected; the slot waits RECONNECT_GRACE_MS
     uint64_t lost_ms;
     int ready, playing, place;
     sim_body body;
-    inputq in;        /* one input per tick; in.applied is echoed in snapshots */
+    inputq in;        // one input per tick; in.applied is echoed in snapshots
 } player;
 
 static struct {
@@ -177,16 +179,16 @@ static void on_hello(conn *c, rbuf *payload, uint64_t now_ms)
     int resumed = p != NULL;
     if (p) {
         if (p->c && p->c != c) {
-            /* The old connection is still around (the client restarted before
-             * we noticed): retire it so the token belongs to one connection. */
+            // The old connection is still around (the client restarted before
+            // we noticed): retire it so the token belongs to one connection.
             p->c->player = -1;
             p->c->token = 0;
             conn_close_soon(p->c, now_ms);
         }
-        /* The player keeps their slot but gets this connection's fresh token.
-         * Packets still in flight from the old connection carry the old token
-         * and are now rejected as stale instead of mixing their sequence
-         * numbers and acks into the new connection's. */
+        // The player keeps their slot but gets this connection's fresh token.
+        // Packets still in flight from the old connection carry the old token
+        // and are now rejected as stale instead of mixing their sequence
+        // numbers and acks into the new connection's.
         p->token = c->token;
     } else {
         p = free_slot();
@@ -235,9 +237,9 @@ static void on_bye(conn *c, player *p, uint64_t now_ms)
 {
     hf_log("#%u \"%s\" left", p->id, p->name);
     if (R.phase == PHASE_PLAYING && p->playing && p->place == 0)
-        p->body.alive = 0;  /* leaving counts as falling out */
+        p->body.alive = 0;  // leaving counts as falling out
     p->c = NULL;
-    p->lost_ms = now_ms - RECONNECT_GRACE_MS;  /* a deliberate exit gets no grace */
+    p->lost_ms = now_ms - RECONNECT_GRACE_MS;  // a deliberate exit gets no grace
     c->player = -1;
     conn_close_soon(c, now_ms);
     R.room_dirty = 1;
@@ -282,7 +284,7 @@ void room_on_message(conn *c, uint8_t type, rbuf *payload, uint64_t now_ms)
         on_bye(c, p, now_ms);
         break;
     default:
-        break;  /* server-to-client or unknown types: ignore */
+        break;  // server-to-client or unknown types: ignore
     }
 }
 
@@ -297,7 +299,7 @@ void room_on_conn_lost(conn *c, uint64_t now_ms)
     p->c = NULL;
     p->lost_ms = now_ms;
     p->ready = 0;
-    inputq_clear(&p->in);  /* stand still until the player is back */
+    inputq_clear(&p->in);  // stand still until the player is back
     R.room_dirty = 1;
     hf_log("#%u \"%s\" lost connection; keeping the slot for %d s", p->id, p->name,
            RECONNECT_GRACE_MS / 1000);
@@ -310,7 +312,7 @@ static void expire_lost_players(uint64_t now_ms)
         if (!p->used || p->c || now_ms - p->lost_ms < RECONNECT_GRACE_MS)
             continue;
         if (R.phase == PHASE_PLAYING && p->playing && p->place == 0)
-            continue;  /* still on the board; remove once the round has placed them */
+            continue;  // still on the board; remove once the round has placed them
         hf_log("#%u \"%s\" removed", p->id, p->name);
         p->used = 0;
         R.room_dirty = 1;
@@ -329,7 +331,7 @@ static void start_round(void)
         if (!p->used)
             continue;
         p->place = 0;
-        p->playing = p->c != NULL;  /* someone who is away sits this round out */
+        p->playing = p->c != NULL;  // someone who is away sits this round out
         if (!p->playing)
             continue;
         float x, z;
@@ -339,7 +341,7 @@ static void start_round(void)
     }
     R.round_players = n;
     R.alive = n;
-    R.arena.armed_tick = R.tick + 1 + START_GRACE_TICKS;  /* the round's first tick is the next one */
+    R.arena.armed_tick = R.tick + 1 + START_GRACE_TICKS;  // the round's first tick is the next one
     R.tiles_dirty = 1;
     set_phase(PHASE_PLAYING, R.arena.armed_tick);
     hf_log("round started with %d players", n);
@@ -351,7 +353,7 @@ static void on_touch(void *ctx, int layer, int q, int r)
     if (R.touched_n < HF_MAX_TILE_EVENTS)
         R.touched[R.touched_n++] = (tile_ref){(uint8_t)layer, (int8_t)q, (int8_t)r};
     else
-        R.tiles_dirty = 1;  /* too many for one event message: send the whole board */
+        R.tiles_dirty = 1;  // too many for one event message: send the whole board
 }
 
 static void finish_round(void)
@@ -492,8 +494,8 @@ static void send_updates(void)
     hf_put_snapshot(&w, &s);
     if (w.overflow)
         return;
-    /* Encoded once; only ack_input differs per client. It sits right after the
-     * type (1 byte), the length (2) and the tick (4). */
+    // Encoded once; only ack_input differs per client. It sits right after the
+    // type (1 byte), the length (2) and the tick (4).
     for (int i = 0; i < HF_MAX_PLAYERS; i++) {
         player *p = &R.p[i];
         if (!p->used || !p->c)

@@ -13,47 +13,49 @@
 #include "util.h"
 #include "world.h"
 
-/* The desktop client's main thread: window, keyboard and mouse, game
- * state, drawing. Everything about the network happens on the network
- * thread; this thread only calls net_send() and drains the event and
- * snapshot channels.
- *
- * Step 2: the other players are drawn a little in the past, between two
- * snapshots (interp.c). Step 3: our own player is predicted, so it moves
- * the moment a key is pressed (predict.c). Keys to compare while playing:
- * I smoothing, G how to guess when snapshots are late, P prediction on and
- * off, N a worse network on purpose.
- *
- * The mouse turns the camera as in a shooter: click into the window and it
- * is held there, ESC lets it go. Then the left button shoves and the right
- * one dives (F and Shift do the same without the mouse). */
+///////////////////////////////////////////////////////////////////////////////////
+// The desktop client's main thread: window, keyboard and mouse, game
+// state, drawing. Everything about the network happens on the network
+// thread; this thread only calls net_send() and drains the event and
+// snapshot channels.
+//
+//     Step 2: the other players are drawn a little in the past, between two
+//     snapshots (interp.c). Step 3: our own player is predicted, so it moves
+//     the moment a key is pressed (predict.c). Keys to compare while playing:
+//     I smoothing, G how to guess when snapshots are late, P prediction on and
+//     off, N a worse network on purpose.
+//
+//     The mouse turns the camera as in a shooter: click into the window and it
+//     is held there, ESC lets it go. Then the left button shoves and the right
+//     one dives (F and Shift do the same without the mouse).
+///////////////////////////////////////////////////////////////////////////////////
 
 #define BATCH 32
 #define INPUT_PERIOD (1.0 / SIM_TICK_HZ)
-#define TURN_PER_PIXEL 0.004f  /* camera turn per pixel of mouse movement, radians */
-#define TURN_PER_SECOND 2.2f   /* camera turn while Q or E is held */
-#define PITCH_MIN 0.15f        /* the chase camera, from nearly level... */
-#define PITCH_MAX 1.0f         /* ...to looking steeply down */
+#define TURN_PER_PIXEL 0.004f  // camera turn per pixel of mouse movement, radians
+#define TURN_PER_SECOND 2.2f   // camera turn while Q or E is held
+#define PITCH_MIN 0.15f        // the chase camera, from nearly level...
+#define PITCH_MAX 1.0f         // ...to looking steeply down
 
-/* Disturbances for received packets (net_set_inbound), cycled with N. */
+// Disturbances for received packets (net_set_inbound), cycled with N.
 static const netsim_cfg BAD_NETWORKS[] = {
     {.loss = 0, .delay_ms = 0, .jitter_ms = 0},
-    {.loss = 0, .delay_ms = 20, .jitter_ms = 60},       /* 20-80 ms: everyday jitter */
-    {.loss = 0.05, .delay_ms = 40, .jitter_ms = 120},  /* 40-160 ms and 5% lost: a bad hotspot */
+    {.loss = 0, .delay_ms = 20, .jitter_ms = 60},       // 20-80 ms: everyday jitter
+    {.loss = 0.05, .delay_ms = 40, .jitter_ms = 120},  // 40-160 ms and 5% lost: a bad hotspot
 };
 #define BAD_NETWORK_COUNT ((int)(sizeof BAD_NETWORKS / sizeof BAD_NETWORKS[0]))
 
 typedef struct {
     uint16_t seq;
-    input_sample history[HF_INPUT_REDUNDANCY];  /* newest first */
+    input_sample history[HF_INPUT_REDUNDANCY];  // newest first
     int count;
-    uint8_t pressed;   /* buttons, latched between input ticks so a quick tap is never missed */
-    double carry;      /* time not yet turned into input ticks */
+    uint8_t pressed;   // buttons, latched between input ticks so a quick tap is never missed
+    double carry;      // time not yet turned into input ticks
 } input_state;
 
 typedef struct {
     const char *file;
-    double after;  /* seconds after start */
+    double after;  // seconds after start
 } timed_shot;
 
 static mq_item batch[BATCH];
@@ -68,14 +70,14 @@ static void send_ready(net_thread *net, int ready)
     net_send(net, buf, w.len);
 }
 
-/* The input the keys make right now (without a seq). Keys are read
- * relative to the camera, which looks along (-sin yaw, -cos yaw), so W is
- * always "away from the camera". The server wants world directions, so the
- * stick is turned by the camera's angle; what it means then no longer
- * depends on the camera. */
+// The input the keys make right now (without a seq). Keys are read
+// relative to the camera, which looks along (-sin yaw, -cos yaw), so W is
+// always "away from the camera". The server wants world directions, so the
+// stick is turned by the camera's angle; what it means then no longer
+// depends on the camera.
 static input_sample read_keys(float yaw, uint8_t pressed)
 {
-    float x = 0, z = 0;  /* x: right on screen, z: toward the camera */
+    float x = 0, z = 0;  // x: right on screen, z: toward the camera
     if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))
         z -= 1;
     if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN))
@@ -97,8 +99,8 @@ static input_sample read_keys(float yaw, uint8_t pressed)
     };
 }
 
-/* Sends `keys` as the next input, with the ones before it for redundancy;
- * returns it as sent. */
+// Sends `keys` as the next input, with the ones before it for redundancy;
+// returns it as sent.
 static input_sample send_input(net_thread *net, input_state *in, input_sample keys)
 {
     keys.seq = ++in->seq;
@@ -118,10 +120,10 @@ static input_sample send_input(net_thread *net, input_state *in, input_sample ke
     return keys;
 }
 
-/* --autopilot: keys as a bot would press them, for unattended checks of
- * the prediction. A while one way, then another, now and then a jump, a
- * dive or a shove (latched in *pressed, as a key press is), back toward
- * the middle when far out. */
+// --autopilot: keys as a bot would press them, for unattended checks of
+// the prediction. A while one way, then another, now and then a jump, a
+// dive or a shove (latched in *pressed, as a key press is), back toward
+// the middle when far out.
 static input_sample autopilot(const predict *pr, uint8_t *pressed)
 {
     static int frames;
@@ -168,7 +170,7 @@ static int parse_guess(const char *s, interp_guess *out)
     return 0;
 }
 
-/* DELAY:JITTER[:LOSS%], e.g. 40:120:5 */
+// DELAY:JITTER[:LOSS%], e.g. 40:120:5
 static int parse_inbound(const char *s, netsim_cfg *out)
 {
     int delay = 0, jitter = 0;
@@ -240,7 +242,7 @@ int main(int argc, char **argv)
     SetTraceLogLevel(LOG_WARNING);
     InitWindow(1280, 720, "Hex Fall");
     SetTargetFPS(60);
-    SetExitKey(KEY_NULL);  /* ESC lets go of the mouse; the window closes as any other */
+    SetExitKey(KEY_NULL);  // ESC lets go of the mouse; the window closes as any other
     render_init();
 
     static world w;
@@ -260,17 +262,17 @@ int main(int argc, char **argv)
     while (!WindowShouldClose()) {
         uint64_t now_ms = hf_now_ms();
 
-        /* 1. Everything the network thread received since the last frame. */
+        // 1. Everything the network thread received since the last frame.
         size_t got;
         while ((got = net_events(net, batch, BATCH)) > 0)
             for (size_t i = 0; i < got; i++)
                 world_apply_event(&w, batch[i].data, batch[i].len, now_ms);
-        if (w.sessions != sessions_seen) {  /* a new session: the old timeline means nothing */
+        if (w.sessions != sessions_seen) {  // a new session: the old timeline means nothing
             sessions_seen = w.sessions;
             interp_restart(&ip);
         }
-        /* Each snapshot goes to both: the world keeps only the newest, the
-         * interpolation keeps a history and also uses ones that came out of order. */
+        // Each snapshot goes to both: the world keeps only the newest, the
+        // interpolation keeps a history and also uses ones that came out of order.
         while ((got = net_snapshots(net, &snap_cursor, batch, BATCH, NULL)) > 0)
             for (size_t i = 0; i < got; i++) {
                 static world_snapshot s;
@@ -279,7 +281,7 @@ int main(int argc, char **argv)
                 world_apply_snapshot(&w, &s, batch[i].at_ms);
                 interp_add(&ip, &s, batch[i].at_ms);
             }
-        if (w.snapshots_used != used_seen) {  /* a newer one: where the server says we are */
+        if (w.snapshots_used != used_seen) {  // a newer one: where the server says we are
             used_seen = w.snapshots_used;
             predict_snapshot(&pr, &w);
         }
@@ -288,12 +290,12 @@ int main(int argc, char **argv)
         const world_player *me = world_player_by_id(&w, w.me);
         opt.ready = me && (me->flags & RP_READY);
 
-        /* 2. Keyboard and mouse. Inputs go out at the server's tick rate, whatever the frame rate. */
+        // 2. Keyboard and mouse. Inputs go out at the server's tick rate, whatever the frame rate.
         float dt = GetFrameTime();
         if (!opt.mouse_look && IsWindowFocused() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            DisableCursor();  /* this click only takes the mouse; the next ones shove */
+            DisableCursor();  // this click only takes the mouse; the next ones shove
             opt.mouse_look = 1;
-            ignore_mouse = 2;  /* the pointer is moved to the middle: not a turn */
+            ignore_mouse = 2;  // the pointer is moved to the middle: not a turn
         } else if (opt.mouse_look && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             in.pressed |= BTN_SHOVE;
         } else if (opt.mouse_look && (IsKeyPressed(KEY_ESCAPE) || !IsWindowFocused())) {
@@ -345,24 +347,24 @@ int main(int argc, char **argv)
         }
         in.carry += dt;
         if (in.carry > 0.25)
-            in.carry = INPUT_PERIOD;  /* after a long stall, do not fire a burst of stale inputs */
+            in.carry = INPUT_PERIOD;  // after a long stall, do not fire a burst of stale inputs
         input_sample keys = auto_keys ? autopilot(&pr, &in.pressed) : read_keys(opt.yaw, in.pressed);
         while (in.carry >= INPUT_PERIOD) {
             if (st.state == NET_CONNECTED) {
                 input_sample sent = send_input(net, &in, keys);
-                predict_input(&pr, &w, &sent);  /* our bean moves now, not when the server says so */
+                predict_input(&pr, &w, &sent);  // our bean moves now, not when the server says so
                 keys.buttons = 0;
             }
             in.carry -= INPUT_PERIOD;
         }
 
-        /* 3. Draw: the others at the moment the interpolation picks, our own
-         * bean where the prediction puts it, part of the way to the next input. */
+        // 3. Draw: the others at the moment the interpolation picks, our own
+        // bean where the prediction puts it, part of the way to the next input.
         interp_frame(&ip, now_ms);
         predict_frame(&pr, &w, &keys, in.carry / INPUT_PERIOD, dt * 1000.0);
         render_frame(&w, &ip, &pr, &st, &opt, now_ms);
 
-        /* Screenshots for unattended checks; the last one ends the program. */
+        // Screenshots for unattended checks; the last one ends the program.
         if (shots_taken < shots && (double)(now_ms - start_ms) >= shot[shots_taken].after * 1000.0) {
             Image img = LoadImageFromScreen();
             ExportImage(img, shot[shots_taken++].file);

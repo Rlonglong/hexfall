@@ -69,8 +69,8 @@ int main(int argc, char **argv)
         hf_log("network disturbance on: loss %.0f%%, delay %d ms, jitter %d ms", ns.loss * 100, ns.delay_ms,
                ns.jitter_ms);
 
-    /* One thread, one loop: wait for packets until the next tick is due, then
-     * simulate, send, and check timeouts. */
+    // One thread, one loop: wait for packets until the next tick is due, then
+    // simulate, send, and check timeouts.
     const uint64_t tick_us = 1000000u / SIM_TICK_HZ;
     uint64_t next_tick = hf_now_us() + tick_us;
     uint64_t next_stats = hf_now_ms() + 5000;
@@ -98,7 +98,7 @@ int main(int argc, char **argv)
             next_tick += tick_us;
         }
         if (now_us >= next_tick)
-            next_tick = now_us + tick_us;  /* fell far behind: skip rather than spiral */
+            next_tick = now_us + tick_us;  // fell far behind: skip rather than spiral
 
         uint64_t now_ms = hf_now_ms();
         udp_maintain(now_ms);

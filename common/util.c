@@ -21,17 +21,17 @@ uint64_t hf_random_u64(void)
 {
     uint64_t v = 0;
     if (getentropy(&v, sizeof v) != 0)
-        v = hf_now_us() ^ ((uint64_t)getpid() << 32);  /* not secret, but unique enough */
+        v = hf_now_us() ^ ((uint64_t)getpid() << 32);  // not secret, but unique enough
     return v;
 }
 
-static _Thread_local uint64_t rng_state;  /* one generator per thread, no sharing */
+static _Thread_local uint64_t rng_state;  // one generator per thread, no sharing
 
 double hf_random01(void)
 {
     if (rng_state == 0)
         rng_state = hf_random_u64() | 1;
-    /* xorshift64* */
+    // xorshift64*
     rng_state ^= rng_state >> 12;
     rng_state ^= rng_state << 25;
     rng_state ^= rng_state >> 27;

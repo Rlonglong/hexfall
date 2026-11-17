@@ -11,17 +11,19 @@
 #include "sim.h"
 #include "util.h"
 
-/* Headless players. One process runs any number of them, each with its own
- * UDP socket, so it doubles as a load generator: hexfall-bot -n 100. They
- * play from what the server tells them: the board from TILES/TILE_EVENTS,
- * and where they and the others are from snapshots. They shove whoever is
- * close in front of them, and dive when a jump is about to fall short. A bot that hears nothing from the
- * server for LOST_MS starts a new session, as the game client does, so the
- * bots carry on when the server is restarted. */
+///////////////////////////////////////////////////////////////////////////////////
+// Headless players. One process runs any number of them, each with its own
+// UDP socket, so it doubles as a load generator: hexfall-bot -n 100. They
+// play from what the server tells them: the board from TILES/TILE_EVENTS,
+// and where they and the others are from snapshots. They shove whoever is
+// close in front of them, and dive when a jump is about to fall short. A bot that hears nothing from the
+// server for LOST_MS starts a new session, as the game client does, so the
+// bots carry on when the server is restarted.
+///////////////////////////////////////////////////////////////////////////////////
 
 #define THINK_TICKS 6
-#define SHOVE_REACH 2.6f  /* a little short of SIM_SHOVE_RANGE: the others move on meanwhile */
-#define LOST_MS 4000  /* the server's timeout too */
+#define SHOVE_REACH 2.6f  // a little short of SIM_SHOVE_RANGE: the others move on meanwhile
+#define LOST_MS 4000  // the server's timeout too
 #define TWO_PI 6.2831853f
 
 typedef struct {
@@ -35,7 +37,7 @@ typedef struct {
     int have_self, alive, grounded, layer, down;
     float x, y, z, vx, vy, vz;
     int others;
-    float other_x[HF_MAX_PLAYERS], other_z[HF_MAX_PLAYERS];  /* alive, on our floor */
+    float other_x[HF_MAX_PLAYERS], other_z[HF_MAX_PLAYERS];  // alive, on our floor
     uint64_t shoved_ms;
     float dir, noise;
     int think;
@@ -46,8 +48,8 @@ typedef struct {
     double rtt_ms;
     int have_rtt;
     int place, rounds, wins;
-    int joined;  /* welcomed at least once */
-    int lost;    /* starting over, not welcomed back yet */
+    int joined;  // welcomed at least once
+    int lost;    // starting over, not welcomed back yet
     int failed;
 } bot;
 
@@ -140,7 +142,7 @@ static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, siz
         if (!hf_get_snapshot(p, &m))
             break;
         if (b->have_snap && (int32_t)(m.tick - b->snap_tick) <= 0)
-            break;  /* arrived after a newer one */
+            break;  // arrived after a newer one
         b->have_snap = 1;
         b->snap_tick = m.tick;
         sim_arena_tick(&b->arena, m.tick);
@@ -190,15 +192,15 @@ static void on_msg(hf_client *cl, uint8_t type, rbuf *p, const uint8_t *msg, siz
     }
 }
 
-/* -1: no floor there, 0: solid, 1: touched (about to fall). */
+// -1: no floor there, 0: solid, 1: touched (about to fall).
 static int floor_at(const bot *b, float x, float z)
 {
     int state = sim_tile_state_at(&b->arena, b->layer, x, z);
     return state < 0 || state == TILE_GONE ? -1 : state == TILE_TOUCHED;
 }
 
-/* Pick the direction with the most untouched floor ahead, with a pull toward
- * the middle, some stubbornness and some noise so bots differ. */
+// Pick the direction with the most untouched floor ahead, with a pull toward
+// the middle, some stubbornness and some noise so bots differ.
 static void think(bot *b)
 {
     float best_dir = b->dir, best = -1e9f;
@@ -218,8 +220,8 @@ static void think(bot *b)
     b->dir = best_dir;
 }
 
-/* A new socket and a new session. With the old token the server hands back
- * the same player, if it still has it; a restarted server makes a new one. */
+// A new socket and a new session. With the old token the server hands back
+// the same player, if it still has it; a restarted server makes a new one.
 static void reconnect(bot *b, struct pollfd *pfd, const struct sockaddr *addr, socklen_t len)
 {
     uint64_t token = b->net.token;
@@ -229,7 +231,7 @@ static void reconnect(bot *b, struct pollfd *pfd, const struct sockaddr *addr, s
         hf_client_hello(&b->net, b->name, CLIENT_BOT, token);
         pfd->fd = b->net.fd;
     }
-    b->net.last_recv_ms = b->now_ms;  /* try again after another LOST_MS */
+    b->net.last_recv_ms = b->now_ms;  // try again after another LOST_MS
     b->phase = PHASE_LOBBY;
     b->have_self = b->have_snap = 0;
 }
@@ -263,17 +265,17 @@ static void bot_tick(bot *b)
             if ((ahead < 0 && beyond >= 0) || hf_random01() < 0.006)
                 buttons |= BTN_JUMP;
         } else if (!b->down && b->vy < 0) {
-            /* Coming down short of the floor, with floor further on: dive for it. */
+            // Coming down short of the floor, with floor further on: dive for it.
             float speed = hypotf(b->vx, b->vz), fx = speed > 1 ? b->vx / speed : dx, fz = speed > 1 ? b->vz / speed : dz;
             if (floor_at(b, b->x + fx * 1.2f, b->z + fz * 1.2f) < 0 && floor_at(b, b->x + fx * 4.5f, b->z + fz * 4.5f) >= 0)
                 buttons |= BTN_DIVE;
         }
-        /* Somebody close in front: shove them, now and then (bots are not perfect). */
+        // Somebody close in front: shove them, now and then (bots are not perfect).
         if (!b->down && b->now_ms - b->shoved_ms > 1000 && hf_random01() < 0.25) {
             for (int i = 0; i < b->others; i++) {
                 float ox = b->other_x[i] - b->x, oz = b->other_z[i] - b->z, d = hypotf(ox, oz);
                 if (d > 0.1f && d < SHOVE_REACH && (ox * dx + oz * dz) / d > 0.5f) {
-                    dx = ox / d;  /* aimed with the stick */
+                    dx = ox / d;  // aimed with the stick
                     dz = oz / d;
                     buttons |= BTN_SHOVE;
                     b->shoved_ms = b->now_ms;
@@ -282,7 +284,7 @@ static void bot_tick(bot *b)
             }
         }
     }
-    /* Newest first; the older samples ride along so one lost packet costs nothing. */
+    // Newest first; the older samples ride along so one lost packet costs nothing.
     memmove(&b->hist[1], &b->hist[0], sizeof b->hist[0] * (HF_INPUT_REDUNDANCY - 1));
     b->hist[0] = (input_sample){
         .seq = ++b->seq,
@@ -443,7 +445,7 @@ int main(int argc, char **argv)
             break;
     }
 
-    /* Say goodbye so the server frees the slots right away. */
+    // Say goodbye so the server frees the slots right away.
     uint64_t now_ms = hf_now_ms();
     for (int i = 0; i < count; i++) {
         if (bots[i].net.fd < 0)

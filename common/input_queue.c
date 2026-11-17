@@ -10,10 +10,10 @@ void inputq_clear(inputq *iq)
 
 void inputq_add(inputq *iq, const msg_input *m)
 {
-    for (int i = m->count - 1; i >= 0; i--) {  /* oldest first */
+    for (int i = m->count - 1; i >= 0; i--) {  // oldest first
         const input_sample *s = &m->s[i];
         if (iq->have_seq && (int16_t)(uint16_t)(s->seq - iq->newest) <= 0)
-            continue;  /* a repeat for redundancy, or out of date */
+            continue;  // a repeat for redundancy, or out of date
         if (iq->len == INPUTQ_CAP) {
             memmove(iq->q, iq->q + 1, sizeof iq->q[0] * (INPUTQ_CAP - 1));
             iq->len--;

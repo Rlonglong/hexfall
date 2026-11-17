@@ -17,12 +17,12 @@ typedef struct {
     uint8_t data[HF_MAX_PACKET];
 } delayed;
 
-static netsim_cfg cfg;                /* set before threads start, then only read */
-static _Thread_local delayed *queue;  /* this thread's; allocated on first use */
+static netsim_cfg cfg;                // set before threads start, then only read
+static _Thread_local delayed *queue;  // this thread's; allocated on first use
 
 static void raw_send(int fd, const void *buf, size_t len, const struct sockaddr *to, socklen_t tolen)
 {
-    /* With UDP a full socket buffer just drops the packet, as the network would. */
+    // With UDP a full socket buffer just drops the packet, as the network would.
     if (to)
         (void)sendto(fd, buf, len, 0, to, tolen);
     else
@@ -60,7 +60,7 @@ void netsim_send(int fd, const void *buf, size_t len, const struct sockaddr *to,
         memcpy(d->data, buf, len);
         return;
     }
-    raw_send(fd, buf, len, to, tolen);  /* queue full: send it now */
+    raw_send(fd, buf, len, to, tolen);  // queue full: send it now
 }
 
 void netsim_flush(uint64_t now_ms)
@@ -99,8 +99,8 @@ void netsim_release(void)
 
 void netsim_forget_fd(int fd)
 {
-    /* The next socket opened will likely get the same number, and must not
-     * send the old socket's packets. */
+    // The next socket opened will likely get the same number, and must not
+    // send the old socket's packets.
     if (!queue)
         return;
     for (int i = 0; i < QUEUE_SLOTS; i++)
