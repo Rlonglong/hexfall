@@ -67,7 +67,7 @@ const char *hf_msg_name(uint8_t type);
 // UTF-8 sequence that the cut left incomplete.
 void hf_clean_name(char *name);
 
-// ---- client -> server ----
+// ===== client -> server =====
 
 typedef struct {
     uint16_t version;
@@ -94,7 +94,7 @@ typedef struct {
 typedef struct { uint32_t client_ms; } msg_ping;
 typedef struct { uint8_t reason; } msg_bye;
 
-// ---- server -> client ----
+// ===== server -> client =====
 
 typedef struct {
     uint64_t token;      // this connection's session id, and the key to reclaim the player later

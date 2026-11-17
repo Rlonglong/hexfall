@@ -76,7 +76,7 @@ const char *net_state_name(net_state s)
     }
 }
 
-// ---- network thread ----
+// ===== network thread =====
 
 static void set_state(net_thread *n, net_state s, uint64_t now_ms)
 {
@@ -334,7 +334,7 @@ static void *run(void *arg)
     return NULL;
 }
 
-// ---- main thread side ----
+// ===== main thread side =====
 
 static void wake_up(net_thread *n)
 {

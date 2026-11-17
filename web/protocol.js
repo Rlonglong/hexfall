@@ -108,7 +108,7 @@ export function* messages(bytes) {
   }
 }
 
-// ---- client -> server ----
+// ===== client -> server =====
 
 export function encodeHello({ kind = CLIENT_KIND.PHONE, resumeToken = 0n, name = '' } = {}) {
   const w = new Writer();
@@ -148,7 +148,7 @@ export function encodeBye(reason = 0) {
   return w.end(at).result();
 }
 
-// ---- decoding (both directions) ----
+// ===== decoding (both directions) =====
 
 const turns = (u16) => (u16 / 65536) * 2 * Math.PI;
 
@@ -217,7 +217,7 @@ export function decode(type, r) {
   }
 }
 
-// ---- the board ----
+// ===== the board =====
 
 // Canonical tile order, as in common/sim.h: q ascending, then r ascending.
 export function tileOrder(ring = 8) {

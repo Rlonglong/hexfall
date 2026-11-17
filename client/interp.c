@@ -71,7 +71,7 @@ static const interp_slot *slot_of(const interp *ip, uint32_t tick)
     return sl->used && sl->s.tick == tick ? sl : NULL;
 }
 
-// ---- measuring the network ----
+// ===== measuring the network =====
 
 static void sort(double *v, int n)
 {
@@ -166,7 +166,7 @@ void interp_add(interp *ip, const world_snapshot *s, uint64_t arrived_ms)
     measure(ip);
 }
 
-// ---- the playout clock ----
+// ===== the playout clock =====
 
 static double wanted_delay(const interp *ip)
 {
@@ -196,7 +196,7 @@ static void steer(interp *ip, uint64_t now_ms, double dt)
     ip->playout_ms += err > room ? room : err < -room ? -room : err;
 }
 
-// ---- what to draw ----
+// ===== what to draw =====
 
 static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
@@ -253,7 +253,7 @@ static void copy(interp_view *v, const world_snapshot *s)
     memcpy(v->bodies, s->bodies, sizeof s->bodies[0] * (size_t)s->count);
 }
 
-// ---- guessing ----
+// ===== guessing =====
 
 static double guess_limit_ms(const interp *ip) { return ip->guess == GUESS_FREEZE ? 0 : INTERP_GUESS_MS; }
 

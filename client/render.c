@@ -49,7 +49,7 @@ static const Color PLAYER_COLORS[16] = {
     {143, 155, 255, 255}, {255, 184, 107, 255}, {100, 227, 161, 255}, {213, 140, 255, 255},
 };
 
-// ---- lighting: hemisphere + sun + fog, one shade per face for the tiles ----
+// ===== lighting: hemisphere + sun + fog, one shade per face for the tiles =====
 
 static const char LIT_VS[] =
     "#version 330\n"
@@ -93,7 +93,7 @@ static Material mat;
 static Mesh hex, ball, pillar, slime, disc, cone;
 static Texture2D dot;
 
-// ---- fonts: player names may be in any script, so the atlas grows ----
+// ===== fonts: player names may be in any script, so the atlas grows =====
 
 static const char *const BODY_FONTS[] = {
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  // macOS; covers CJK
@@ -118,7 +118,7 @@ static Font body_font, display_font;
 static int body_loaded, display_loaded;
 static int codepoints[MAX_CODEPOINTS], codepoint_count, codepoints_added;
 
-// ---- cosmetic state ----
+// ===== cosmetic state =====
 
 typedef struct {
     uint16_t id;
@@ -184,7 +184,7 @@ static Color player_color(const world *w, uint16_t id)
 
 static Color faded(Color c, float k) { return ColorAlpha(c, (float)c.a / 255.0f * clampf(k, 0, 1)); }
 
-// ================================================================ setup
+// ===== setup =====
 
 static void put_triangle(float **v, float **n, Vector3 a, Vector3 b, Vector3 c, Vector3 normal)
 {
@@ -335,7 +335,7 @@ void render_close(void)
     UnloadShader(lit);
 }
 
-// ================================================================ 3D
+// ===== 3D =====
 
 static void draw_mesh(Mesh m, Color c, Matrix t)
 {
@@ -892,7 +892,7 @@ static void watch_moves(const world *w, const interp_view *v, float dt)
     }
 }
 
-// ================================================================ HUD
+// ===== HUD =====
 
 static Font display_face(void) { return display_loaded ? display_font : body_font; }
 
@@ -1319,7 +1319,7 @@ static void draw_network_panel(const world *w, const interp *ip, const predict *
         text(lines[i], 28, y + 28 + (float)i * row, size, FG);
 }
 
-// ================================================================ frame
+// ===== frame =====
 
 void render_frame(const world *w, const interp *ip, const predict *pr, const net_status *st,
                   const render_options *opt, uint64_t now_ms)

@@ -62,7 +62,7 @@ void hf_clean_name(char *s)
         s[start - 1] = 0;
 }
 
-// ---- framing ----
+// ===== framing =====
 
 static size_t msg_begin(wbuf *w, uint8_t type)
 {
@@ -97,7 +97,7 @@ int hf_next_msg(rbuf *r, uint8_t *type, rbuf *payload)
 
 static uint8_t cap_u8(unsigned v, unsigned max) { return (uint8_t)(v > max ? max : v); }
 
-// ---- client -> server ----
+// ===== client -> server =====
 
 void hf_put_hello(wbuf *w, const msg_hello *m)
 {
@@ -183,7 +183,7 @@ int hf_get_bye(rbuf *p, msg_bye *m)
     return !p->error;
 }
 
-// ---- server -> client ----
+// ===== server -> client =====
 
 void hf_put_welcome(wbuf *w, const msg_welcome *m)
 {
@@ -406,7 +406,7 @@ int hf_get_error(rbuf *p, msg_error *m)
     return !p->error;
 }
 
-// ---- UDP envelope ----
+// ===== UDP envelope =====
 
 void hf_put_udp_header(wbuf *w, uint64_t session)
 {
